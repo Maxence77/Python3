@@ -10,35 +10,35 @@ on:
       - main
 
 jobs:
-  build:
+  check:
     runs-on: ubuntu-latest
 
     strategy:
       matrix:
-        python-version: [3.10, 3.11]
+        python-version: [3.11]
 
     steps:
+      # Récupérer le code du dépôt
       - name: Checkout repository
         uses: actions/checkout@v3
 
+      # Configurer Python sur le runner
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: ${{ matrix.python-version }}
 
+      # Installer pip et dépendances (facultatif si tu n'as pas requirements.txt)
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           pip install pytest flake8
 
+      # Vérifier le code avec flake8
       - name: Lint with flake8
-        run: |
-          # Arrêter le job si le lint échoue
-          flake8 .
+        run: flake8 .
 
+      # Exécuter les tests
       - name: Run tests
-        run: |
-          pytest
-
-
+        run: pytest
