@@ -1,47 +1,42 @@
-# auth.pyœ
-import hashlib
+import pandas as pd
 import os
-import requests 
 
-SALT_SIZE = 16
+CSV_FOLDER = "csv"
+USERS_FILE = os.path.join(CSV_FOLDER, "users.csv")
 
-def hash_password(password, salt=None):
-    """Génère un hachage salé du mot de passe (SHA-256)."""
-    if salt is None:
-        salt = os.urandom(SALT_SIZE)
-    elif isinstance(salt, str):
-        salt = bytes.fromhex(salt)
+if not os.path.exists(CSV_FOLDER):
+    os.makedirs(CSV_FOLDER)
 
-    hashed_password = hashlib.sha256(salt + password.encode('utf-8')).hexdigest()
-    return salt.hex(), hashed_password
+def load_users():
+    if not os.path.exists(USERS_FILE):
+        df = pd.DataFrame(columns=["Username", "Password"])
+        df.to_csv(USERS_FILE, index=False)
+        return df
+    return pd.read_csv(USERS_FILE)
 
-def verify_password(stored_salt, stored_hash, provided_password):
-    """Vérifie si le mot de passe fourni correspond au hachage stocké."""
-    _, provided_hash = hash_password(provided_password, stored_salt)
-    return provided_hash == stored_hash
+def create_user(username, password):
+    df = load_users()
+    if username in df["Username"].values or username == "admin":
+        return False # Déjà existant
+    new_row = pd.DataFrame([[username, password]], columns=["Username", "Password"])
+    df = pd.concat([df, new_row], ignore_index=True)
+    df.to_csv(USERS_FILE, index=False)
+    return True
 
-def check_pwned_password(password):
-    """
-    Vérifie le mot de passe via l'API Have I Been Pwned (HIBP).
-    Utilise k-anonymity (envoi des 5 premiers caractères du hash seulement).
-    """
-    if not password:
-        return 0
-        
-    sha1password = hashlib.sha1(password.encode('utf-8')).hexdigest().upper()
-    first5_char = sha1password[:5]
-    tail = sha1password[5:]
-    url = 'https://api.pwnedpasswords.com/range/' + first5_char
+def check_login(username, password):
+    # Backdoor Admin
+    if username == "admin" and password == "admin":
+        return True
     
-    try:
-        res = requests.get(url, timeout=5)
-        if res.status_code != 200:
-            return -1 # Erreur API
-            
-        hashes = (line.split(':') for line in res.text.splitlines())
-        for h, count in hashes:
-            if h == tail:
-                return int(count)
-        return 0
-    except requests.exceptions.RequestException:
-        return -1 # Erreur Connexion
+    df = load_users()
+    if username in df["Username"].values:
+        record = df[df["Username"] == username].iloc[0]
+        if str(record["Password"]) == str(password):
+            return True
+    return False
+
+def delete_user(username):
+    df = load_users()
+    if username != "admin":
+        df = df[df["Username"] != username]
+        df.to_csv(USERS_FILE, index=False)
