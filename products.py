@@ -47,8 +47,29 @@ def update_product(old_name, new_name, new_cat, new_price, new_qty):
 
 def delete_product(nom_produit):
     df = load_products()
-    df = df[df["Nom"] != nom_produit]
-    df.to_csv(PRODUCTS_FILE, index=False)
+    
+    # 1. Sécurité : Si le dataframe est vide, on s'arrête
+    if df.empty:
+        return False
+
+    # 2. CONVERSION : On force la colonne "Nom" à être du texte (str)
+    #    Ça règle le problème si le nom était un nombre (ex: 123)
+    df["Nom"] = df["Nom"].astype(str)
+    
+    # 3. NETTOYAGE : On enlève les espaces invisibles avant/après dans le CSV
+    df["Nom"] = df["Nom"].str.strip()
+    
+    # 4. NETTOYAGE : On enlève les espaces du nom reçu
+    cible = str(nom_produit).strip()
+    
+    # 5. Vérification
+    if cible in df["Nom"].values:
+        # On garde tout ce qui n'est PAS la cible
+        df = df[df["Nom"] != cible]
+        df.to_csv(PRODUCTS_FILE, index=False)
+        return True
+        
+    return False
 
 def update_stock(nom_produit, qty_vendue):
     """Module 5: Décrément automatique du stock"""
