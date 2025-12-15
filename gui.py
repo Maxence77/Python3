@@ -403,7 +403,7 @@ class App(tk.Tk):
 
         tk.Button(card, text="Mettre à jour le mot de passe", command=update_pass).pack(pady=15)
         
-        tk.Label(card, text="ℹ️ Protection 'Have I Been Pwned' active.", fg="gray").pack(side="bottom", pady=20)
+        tk.Label(card, text="ℹ️ Protection API active.", fg="gray").pack(side="bottom", pady=20)
 
     # =========================================================================
     # PARTIE 7 : ADMINISTRATION (Module 3 & 4)
