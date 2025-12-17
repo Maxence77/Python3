@@ -79,3 +79,23 @@ def update_stock(nom_produit, qty_vendue):
         current_qty = df.at[idx[0], "Quantité"]
         df.at[idx[0], "Quantité"] = current_qty - qty_vendue
         df.to_csv(PRODUCTS_FILE, index=False)
+
+def get_product(nom_produit):
+    """Cherche un produit spécifique et retourne ses infos ou None."""
+    df = load_products()
+    
+    if df.empty:
+        return None
+
+    # Nettoyage pour comparaison fiable
+    df["Nom"] = df["Nom"].astype(str).str.strip()
+    cible = str(nom_produit).strip()
+    
+    # Filtrage
+    resultat = df[df["Nom"] == cible]
+    
+    if not resultat.empty:
+        # On retourne la première ligne trouvée sous forme de dictionnaire
+        return resultat.iloc[0].to_dict()
+    
+    return None
