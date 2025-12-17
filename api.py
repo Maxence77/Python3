@@ -3,6 +3,7 @@ from flask_jwt_extended import JWTManager, create_access_token, jwt_required, ge
 import products
 import auth
 import orders
+import stats
 
 app = Flask(__name__)
 jwt = JWTManager(app)
@@ -120,7 +121,68 @@ def delete_product_endpoint(product_name):
     if succes:
         return jsonify({"message": f"Produit '{product_name}' supprimé."}), 200
     else:
-        return jsonify({"message": f"error fdp"}), 404
+        return jsonify({"message": f"erreur ouais ouais ouais"}), 404
+    
+   # --- ROUTE 7 : DÉTAILS D'UN PRODUIT (GET) ---
+@app.route('/api/products/<string:product_name>', methods=['GET'])
+def get_product_detail(product_name):
+    
+    # Appel de la fonction de recherche
+    infos_produit = products.get_product(product_name)
+    
+    if infos_produit:
+        # Si trouvé, on renvoie le JSON du produit
+        return jsonify(infos_produit), 200
+    else:
+        # Si pas trouvé
+        return jsonify({"error": "Produit introuvable"}), 404
+    
+
+@app.route('/api/orders', methods=['GET'])
+@jwt_required()
+def get_orders():
+    # Optionnel : On pourrait filtrer pour que l'utilisateur ne voie que SES commandes.
+    # Ici, on fait simple : on affiche tout.
+    df = orders.load_orders()
+    if df.empty:
+        return jsonify([])
+    return jsonify(df.to_dict(orient='records')), 200
+
+# --- ROUTE 9 : PASSER UNE COMMANDE (POST) ---
+@app.route('/api/orders', methods=['POST'])
+@jwt_required()
+def add_order():
+    # 1. Qui est connecté ?
+    current_user = get_jwt_identity()
+    
+    # 2. Que veut-il acheter ?
+    data = request.get_json()
+    if not data or 'produit' not in data or 'quantité' not in data:
+        return jsonify({"error": "Il faut 'produit' et 'quantité'"}), 400
+        
+    nom_prod = data['produit']
+    qty = int(data['quantité'])
+    
+    if qty <= 0:
+        return jsonify({"error": "La quantité doit être positive"}), 400
+
+    # 3. Action !
+    succes, message = orders.create_order(current_user, nom_prod, qty), 'oeoeoe'
+    
+    if succes:
+        return jsonify({"message": message}), 201
+    else:
+        return jsonify({"error": message}), 409 # 409 = Conflit (stock)
+
+
+# --- ROUTE 10 : STATISTIQUES (GET) ---
+@app.route('/api/stats', methods=['GET'])
+@jwt_required() # Réservé aux admins connectés
+def get_stats():
+    # Appel de la fonction de calcul
+    data = stats.get_global_stats()
+    
+    return jsonify(data), 200
 
 # --- LANCEMENT ---
 if __name__ == '__main__':
@@ -129,3 +191,4 @@ if __name__ == '__main__':
     app.run(debug=True, port=5000)
 
 
+    
