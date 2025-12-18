@@ -1,8 +1,8 @@
 """
-Module principal de l'API Flask.
+Module principal de l'API Flask (CORRIGÉ).
 
 Gère l'authentification, les produits, les commandes et les statistiques.
-Point d'entrée de l'application.
+Intègre la gestion des mots de passe compromis (Pwned API).
 """
 
 import os
@@ -26,7 +26,7 @@ load_dotenv()
 app = Flask(__name__)
 
 # --- CONFIGURATION SÉCURISÉE ---
-# Récupération de la clé depuis le .env (Correction Bandit B105)
+# Récupération de la clé depuis le .env
 app.config["JWT_SECRET_KEY"] = os.getenv("JWT_SECRET_KEY", "fallback-dev-key")
 
 jwt = JWTManager(app)
@@ -50,11 +50,12 @@ def home():
     return jsonify({"message": "API Groupe3 en ligne 🚀", "status": "active"})
 
 
-# --- ROUTE 2 : LOGIN ---
+# --- ROUTE 2 : LOGIN (CORRIGÉE) ---
 @app.route('/api/auth/login', methods=['POST'])
 def login():
     """
     Authentifie un utilisateur et retourne un token JWT + statut admin.
+    Gère le cas "WARNING" (mot de passe piraté).
     """
     data = request.get_json()
 
@@ -65,32 +66,33 @@ def login():
     username = data['username']
     password = data['password']
 
-    # 2. Validation format username (Sécurité + Propreté)
+    # 2. Validation format username
     if not is_valid_username(username):
         return jsonify({
             "error": "Format invalide. Utilisez uniquement lettres, chiffres et '_'"
         }), 400
 
-    # 3. Authentification via auth.py (retourne un tuple)
-    # status peut être : "OK", "FAIL", "COMPROMISED"
-    # is_admin est un booléen : True / False
-    status, is_admin = auth.authenticate_user(username, password)
+    # 3. Authentification via auth.py
+    # CORRECTION IMPORTANTE : On récupère 3 valeurs (status, is_admin, token_interne)
+    status, is_admin, _ = auth.authenticate_user(username, password)
 
-    if status == "OK":
+    # Cas A : Succès complet ou Succès avec Avertissement
+    if status in ["SUCCESS", "WARNING"]:
         access_token = create_access_token(identity=username)
-        return jsonify({
+        
+        response = {
             "message": "Connexion réussie",
             "token": access_token,
             "is_admin": is_admin
-        }), 200
+        }
+        
+        # Si le mot de passe est compromis, on ajoute une alerte dans le JSON
+        if status == "WARNING":
+            response["alert"] = "⚠️ SÉCURITÉ : Votre mot de passe est compromis (Pwned API). Changez-le rapidement."
+            
+        return jsonify(response), 200
 
-    if status == "COMPROMISED":
-        # On peut choisir de bloquer ou d'avertir. Ici on refuse l'accès par sécurité.
-        return jsonify({
-            "error": "Mot de passe compromis (public). Veuillez le changer.",
-            "is_admin": False
-        }), 403
-
+    # Cas B : Échec
     return jsonify({"error": "Identifiants incorrects"}), 401
 
 
@@ -103,7 +105,7 @@ def get_all_products():
     if df_products.empty:
         return jsonify([])
 
-    # Nettoyage des valeurs NaN (Not a Number) qui font planter le JSON
+    # Nettoyage des valeurs NaN pour le JSON
     df_products = df_products.where(pd.notnull(df_products), None)
     data = df_products.to_dict(orient='records')
     return jsonify(data)
@@ -142,6 +144,8 @@ def update_product_endpoint(product_name):
     if not data:
         return jsonify({"error": "Aucune donnée envoyée"}), 400
 
+    # On appelle la fonction update de products.py
+    # Note : assure-toi que products.update_product ou update_product_full est bien aligné
     succes = products.update_product(
         product_name,
         data.get('nom', product_name),
@@ -152,7 +156,7 @@ def update_product_endpoint(product_name):
 
     if succes:
         return jsonify({"message": f"Produit '{product_name}' mis à jour !"}), 200
-    return jsonify({"error": "Produit introuvable"}), 404
+    return jsonify({"error": "Produit introuvable ou erreur de mise à jour"}), 404
 
 
 # --- ROUTE 6 : SUPPRIMER UN PRODUIT ---
@@ -186,6 +190,9 @@ def get_orders():
     df_orders = orders.load_orders()
     if df_orders.empty:
         return jsonify([])
+    
+    # Nettoyage NaN
+    df_orders = df_orders.where(pd.notnull(df_orders), None)
     return jsonify(df_orders.to_dict(orient='records')), 200
 
 
@@ -202,7 +209,6 @@ def add_order():
 
     nom_prod = data['produit']
     
-    # Validation du type de donnée pour la quantité
     try:
         qty = int(data['quantité'])
     except ValueError:
@@ -228,6 +234,5 @@ def get_stats():
 
 
 if __name__ == '__main__':
-    # Correction Bandit B201 : On utilise nosec pour ignorer l'alerte debug=True
-    # car c'est un environnement de développement/école.
-    app.run(debug=True, port=5000)  # nosec
+    # Mode debug activé pour le développement
+    app.run(debug=True, port=5000)
