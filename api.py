@@ -6,7 +6,7 @@ Point d'entrée de l'application.
 """
 
 import os
-# 1. Imports Tiers
+import re
 import pandas as pd
 from flask import Flask, jsonify, request
 from flask_jwt_extended import (
@@ -14,7 +14,7 @@ from flask_jwt_extended import (
 )
 from dotenv import load_dotenv
 
-# 2. Imports Locaux (Tes modules)
+# Imports Locaux
 import products
 import auth
 import orders
@@ -25,12 +25,22 @@ load_dotenv()
 
 app = Flask(__name__)
 
-# --- CONFIGURATION SÉCURISÉE (Correction Bandit B105) ---
-# On récupère la clé secrète depuis le .env.
-# "dev-fallback-key" est là juste pour éviter que ça plante si tu oublies le .env en local.
-app.config["JWT_SECRET_KEY"] = os.getenv("JWT_SECRET_KEY", "dev-fallback-key")
+# --- CONFIGURATION SÉCURISÉE ---
+# Récupération de la clé depuis le .env (Correction Bandit B105)
+app.config["JWT_SECRET_KEY"] = os.getenv("JWT_SECRET_KEY", "fallback-dev-key")
 
 jwt = JWTManager(app)
+
+
+# --- UTILITAIRES ---
+def is_valid_username(username):
+    """
+    Vérifie que le nom d'utilisateur ne contient que :
+    - Lettres (a-z, A-Z)
+    - Chiffres (0-9)
+    - Underscore (_)
+    """
+    return re.match(r'^[a-zA-Z0-9_]+$', username) is not None
 
 
 # --- ROUTE 1 : ACCUEIL ---
@@ -43,27 +53,43 @@ def home():
 # --- ROUTE 2 : LOGIN ---
 @app.route('/api/auth/login', methods=['POST'])
 def login():
-    """Authentifie un utilisateur et retourne un token JWT."""
+    """
+    Authentifie un utilisateur et retourne un token JWT + statut admin.
+    """
     data = request.get_json()
 
-    # Vérification des champs
+    # 1. Vérification des champs requis
     if not data or 'username' not in data or 'password' not in data:
         return jsonify({"error": "Champs manquants"}), 400
 
     username = data['username']
     password = data['password']
 
-    # --- MISE À JOUR SÉCURITÉ ---
-    # On utilise la fonction 'authenticate_user' du nouveau auth.py sécurisé.
-    # (Avant c'était auth.check_login)
-    status = auth.authenticate_user(username, password)
+    # 2. Validation format username (Sécurité + Propreté)
+    if not is_valid_username(username):
+        return jsonify({
+            "error": "Format invalide. Utilisez uniquement lettres, chiffres et '_'"
+        }), 400
+
+    # 3. Authentification via auth.py (retourne un tuple)
+    # status peut être : "OK", "FAIL", "COMPROMISED"
+    # is_admin est un booléen : True / False
+    status, is_admin = auth.authenticate_user(username, password)
 
     if status == "OK":
         access_token = create_access_token(identity=username)
         return jsonify({
             "message": "Connexion réussie",
-            "token": access_token
+            "token": access_token,
+            "is_admin": is_admin
         }), 200
+
+    if status == "COMPROMISED":
+        # On peut choisir de bloquer ou d'avertir. Ici on refuse l'accès par sécurité.
+        return jsonify({
+            "error": "Mot de passe compromis (public). Veuillez le changer.",
+            "is_admin": False
+        }), 403
 
     return jsonify({"error": "Identifiants incorrects"}), 401
 
@@ -77,7 +103,7 @@ def get_all_products():
     if df_products.empty:
         return jsonify([])
 
-    # Nettoyage des valeurs nulles (NaN) pour le JSON car JSON déteste les NaN
+    # Nettoyage des valeurs NaN (Not a Number) qui font planter le JSON
     df_products = df_products.where(pd.notnull(df_products), None)
     data = df_products.to_dict(orient='records')
     return jsonify(data)
@@ -175,7 +201,8 @@ def add_order():
         return jsonify({"error": "Il faut 'produit' et 'quantité'"}), 400
 
     nom_prod = data['produit']
-    # Sécurité : on s'assure que c'est bien un entier
+    
+    # Validation du type de donnée pour la quantité
     try:
         qty = int(data['quantité'])
     except ValueError:
@@ -201,5 +228,6 @@ def get_stats():
 
 
 if __name__ == '__main__':
-    # Correction Bandit B201 : On signale que le debug=True est volontaire
+    # Correction Bandit B201 : On utilise nosec pour ignorer l'alerte debug=True
+    # car c'est un environnement de développement/école.
     app.run(debug=True, port=5000)  # nosec

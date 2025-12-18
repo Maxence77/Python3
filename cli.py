@@ -1,230 +1,306 @@
-"""
-Interface en ligne de commande (CLI) pour l'application de gestion.
-Point d'entrée principal pour l'utilisateur final.
-"""
-
 import os
-import sys
+import time
 import getpass
 import pandas as pd
+
 # Imports locaux
-import products
 import auth
+import products
 import orders
 
-# Configuration pour l'affichage Pandas
-pd.set_option('display.max_columns', None)
-pd.set_option('display.width', 1000)
+class CLIApp:
+    def __init__(self):
+        self.current_user = None
+        self.is_admin = False
+        self.running = True
 
+    def clear(self):
+        """Nettoie la console (Windows ou Linux/Mac)."""
+        os.system('cls' if os.name == 'nt' else 'clear')
 
-def clear_screen():
-    """Efface l'écran du terminal pour une meilleure lisibilité."""
-    os.system('cls' if os.name == 'nt' else 'clear') # nosec
+    def header(self, title="ACCUEIL"):
+        self.clear()
+        print("="*50)
+        print(f"   ERP GROUPE 3 - CLI MODE [{title}]")
+        if self.current_user:
+            role = "ADMIN" if self.is_admin else "USER"
+            print(f"   👤 Connecté: {self.current_user} ({role})")
+        print("="*50)
+        print("")
 
-
-def create_account_interaction():
-    """Gère le formulaire de création de compte."""
-    print("\n➕ --- CRÉATION DE COMPTE ---")
-    new_user = input("Nouvel Identifiant : ").strip()
-    new_pass = getpass.getpass("Nouveau Mot de passe : ").strip()
-
-    if not new_user or not new_pass:
-        print("❌ Erreur : Champs vides.")
-        return
-
-    # Appel à auth.py qui gère le sel, le hachage et l'API Pwned
-    # Retourne soit "EXIST", soit un entier (nombre de fuites)
-    status_or_count = auth.create_user(new_user, new_pass)
-
-    if status_or_count == "EXIST":
-        print("❌ Ce nom d'utilisateur est déjà pris.")
-    else:
-        print("✅ Compte créé avec succès !")
-        # Si c'est un entier > 0, c'est que le mot de passe est compromis
-        if isinstance(status_or_count, int) and status_or_count > 0:
-            print(f"⚠️ ATTENTION : Mot de passe vu {status_or_count} fois dans des fuites.")
-            print("   Nous vous conseillons fortement de le changer.")
-        input("\nAppuyez sur Entrée pour revenir à la connexion...")
-
-
-def login_step():
-    """Gère la boucle de connexion ou d'inscription."""
-    while True:
-        clear_screen()
-        print("==================================")
-        print(" 🔐 AUTHENTIFICATION GROUPE3 ")
-        print("==================================")
-        print("Connectez-vous ou tapez 'C' pour Créer un compte.")
-        print("Tapez 'Q' pour Quitter.")
-        print("----------------------------------")
-
-        user_input = input("Identifiant (ou C/Q) : ").strip()
-
-        if user_input.lower() == 'q':
-            print("Fermeture de l'application.")
-            sys.exit()
-
-        if user_input.lower() == 'c':
-            create_account_interaction()
-            continue
-
-        # Tentative de connexion
-        pwd = getpass.getpass("Mot de passe : ")
-        status = auth.check_login(user_input, pwd)
-
-        if status == "OK":
-            print("✅ Connexion réussie !")
-            return user_input
-
-        if status == "COMPROMISED":
-            print("⚠️ ALERTE : Connexion réussie, mais votre mot de passe est COMPROMIS !")
-            print("   Veuillez le changer dès que possible.")
-            input("Appuyez sur Entrée pour continuer...")
-            return user_input
-
-        print("❌ Identifiant ou mot de passe incorrect.")
-        input("Appuyez sur Entrée pour réessayer...")
-
-
-def display_menu(username):
-    """Affiche le menu principal et retourne le choix de l'utilisateur."""
-    print(f"\n👤 Utilisateur : {username}")
-    print("==================================")
-    print(" GESTION D'INVENTAIRE 🛡️")
-    print("==================================")
-    print("1. Afficher l'inventaire")
-    print("2. Ajouter un produit")
-    print("3. Rechercher un produit")
-    print("4. Statistiques & Commandes")
-    print("5. Administration (Users)")
-    print("0. Quitter")
-    return input("Votre choix : ")
-
-
-def show_inventory():
-    """Affiche la liste complète des produits."""
-    df_prods = products.load_products()
-    if df_prods.empty:
-        print("\n📭 L'inventaire est vide.")
-    else:
-        print("\n📦 --- INVENTAIRE ACTUEL ---")
-        # On remplace les NaN par vide pour l'affichage propre
-        print(df_prods[["Nom", "Catégorie", "Prix", "Quantité"]].fillna("").to_string(index=False))
-
-
-def add_product_interaction():
-    """Interface pour ajouter un produit."""
-    print("\n➕ --- AJOUT PRODUIT ---")
-    nom = input("Nom : ").strip()
-    cat = input("Catégorie (Info, Meuble, Vêtement...) : ").strip()
-    try:
-        prix_str = input("Prix : ")
-        qty_str = input("Quantité : ")
-
-        if not prix_str or not qty_str:
-            print("❌ Erreur : Valeurs manquantes.")
-            return
-
-        prix = float(prix_str)
-        qty = int(qty_str)
-
-        if products.add_product(nom, cat, prix, qty):
-            print("✅ Produit ajouté avec succès !")
-        else:
-            print("❌ Erreur : Ce produit existe déjà.")
-    except ValueError:
-        print("❌ Erreur : Veuillez entrer des nombres valides pour le prix et la quantité.")
-
-
-def search_product_interaction():
-    """Interface de recherche de produit."""
-    query = input("\n🔍 Rechercher (Nom) : ").lower().strip()
-    df_prods = products.load_products()
-
-    if df_prods.empty:
-        print("Inventaire vide.")
-        return
-
-    # Conversion en string pour éviter les erreurs si la colonne contient des nombres
-    df_prods["Nom"] = df_prods["Nom"].astype(str)
-
-    # Filtrage insensible à la casse
-    results = df_prods[df_prods["Nom"].str.lower().str.contains(query, na=False)]
-
-    if not results.empty:
-        print(f"\n--- {len(results)} RÉSULTAT(S) ---")
-        print(results[["Nom", "Catégorie", "Prix", "Quantité"]].to_string(index=False))
-    else:
-        print("Aucun produit trouvé.")
-
-
-def stats_menu():
-    """Affiche les KPI (Indicateurs clés de performance)."""
-    print("\n📊 --- STATISTIQUES ---")
-    df_prods = products.load_products()
-    df_orders = orders.load_orders()
-
-    # Calcul Valeur Stock : On force la conversion en numérique pour éviter les bugs
-    stock_val = (
-        pd.to_numeric(df_prods["Prix"], errors='coerce').fillna(0) *
-        pd.to_numeric(df_prods["Quantité"], errors='coerce').fillna(0)
-    ).sum()
-
-    # Calcul CA
-    if not df_orders.empty:
-        ca_total = pd.to_numeric(df_orders["Prix Total"], errors='coerce').fillna(0).sum()
-    else:
-        ca_total = 0
-
-    print(f"💰 Valeur du Stock : {stock_val:,.2f} €")
-    print(f"📈 Chiffre d'Affaires : {ca_total:,.2f} €")
-    print(f"🛒 Nombre de ventes : {len(df_orders)}")
-
-
-def admin_menu():
-    """Menu réservé à l'administrateur pour gérer les utilisateurs."""
-    print("\n🔧 --- ADMINISTRATION ---")
-    df_users = auth.load_users()
-    print(df_users[["Username", "Compromised"]].to_string(index=False))
-
-    choice = input("\n[S]upprimer un user ou [R]etour ? ").lower().strip()
-    if choice == 's':
-        target_user = input("Nom de l'utilisateur à supprimer : ").strip()
-        auth.delete_user(target_user)
-        print(f"Utilisateur '{target_user}' supprimé (s'il existait).")
-
-
-def run_application():
-    """Fonction principale de l'application."""
-    # 1. Connexion
-    current_user = login_step()
-
-    # 2. Boucle du menu
-    while True:
-        choice = display_menu(current_user)
-
-        if choice == '1':
-            show_inventory()
-        elif choice == '2':
-            add_product_interaction()
-        elif choice == '3':
-            search_product_interaction()
-        elif choice == '4':
-            stats_menu()
-        elif choice == '5':
-            if current_user == "admin":
-                admin_menu()
-            else:
-                print("⛔ Accès refusé. Réservé à l'administrateur.")
-        elif choice == '0':
-            print("Au revoir !")
-            break
-        else:
-            print("❌ Choix invalide.")
-
+    def pause(self):
         input("\nAppuyez sur Entrée pour continuer...")
-        clear_screen()
 
+    # ==========================
+    # BOUCLE PRINCIPALE & LOGIN
+    # ==========================
+    def run(self):
+        while self.running:
+            if not self.current_user:
+                self.menu_login()
+            else:
+                self.menu_main()
+
+    def menu_login(self):
+        self.clear()
+        print("=== ERP SYSTEM : CONNEXION ===")
+        print("1. Se connecter")
+        print("2. Créer un compte")
+        print("3. Quitter")
+        
+        choice = input("\nChoix > ")
+
+        if choice == "1":
+            u = input("Utilisateur : ")
+            p = getpass.getpass("Mot de passe : ") # Masque la saisie
+            
+            # Gestion des 3 statuts retournés par auth.py
+            status, is_admin, _ = auth.authenticate_user(u, p)
+            
+            if status in ["SUCCESS", "WARNING"]:
+                self.current_user = u
+                self.is_admin = is_admin
+                
+                if status == "WARNING":
+                    print("\n⚠️  ALERTE SÉCURITÉ ⚠️")
+                    print("Votre mot de passe a été trouvé dans une fuite de données (API Pwned).")
+                    print("Veuillez le changer immédiatement dans le menu Profil !")
+                    self.pause()
+                
+                # Vérification des messages admin
+                msgs = auth.get_user_messages(u)
+                if msgs:
+                    print("\n📬 VOUS AVEZ DES MESSAGES ADMIN :")
+                    for m in msgs: print(f" - {m}")
+                    self.pause()
+            else:
+                print("\n❌ Login incorrect.")
+                self.pause()
+
+        elif choice == "2":
+            u = input("Nouvel utilisateur : ")
+            p = getpass.getpass("Nouveau mot de passe : ")
+            code, msg = auth.create_user(u, p)
+            print(f"\nResultat : {msg}")
+            self.pause()
+
+        elif choice == "3":
+            print("Au revoir.")
+            self.running = False
+
+    # ==========================
+    # MENU PRINCIPAL
+    # ==========================
+    def menu_main(self):
+        self.header("MENU PRINCIPAL")
+        print("1. 📊 Dashboard")
+        print("2. 📦 Commandes")
+        print("3. 🏷️  Produits")
+        print("4. 👤 Profil (Changer MDP)")
+        
+        if self.is_admin:
+            print("5. 🛡️  ADMINISTRATION")
+            print("0. Déconnexion")
+        else:
+            print("0. Déconnexion")
+
+        choice = input("\nChoix > ")
+
+        if choice == "1": self.view_dashboard()
+        elif choice == "2": self.view_orders()
+        elif choice == "3": self.view_products()
+        elif choice == "4": self.view_profile()
+        elif choice == "5" and self.is_admin: self.view_admin()
+        elif choice == "0": self.current_user = None
+        else: pass
+
+    # ==========================
+    # 1. DASHBOARD
+    # ==========================
+    def view_dashboard(self):
+        self.header("DASHBOARD")
+        df = orders.load_orders()
+        
+        if df.empty:
+            print("Aucune donnée disponible.")
+        else:
+            # KPI
+            ca = df["Prix Total"].sum()
+            print(f"💰 CHIFFRE D'AFFAIRES TOTAL : {ca:.2f} €")
+            print("-" * 30)
+            
+            # Top Produits (Mode texte)
+            print("🏆 TOP 5 PRODUITS (par quantité) :")
+            top = df.groupby("Produit")["Quantité"].sum().sort_values(ascending=False).head(5)
+            print(top.to_string())
+            print("-" * 30)
+
+            # Dernières ventes
+            print("📅 5 DERNIÈRES VENTES :")
+            print(df[["Date", "Produit", "Prix Total"]].tail(5).to_string(index=False))
+
+        self.pause()
+
+    # ==========================
+    # 2. COMMANDES
+    # ==========================
+    def view_orders(self):
+        while True:
+            self.header("GESTION COMMANDES")
+            df = orders.load_orders()
+            if not df.empty:
+                # Affichage tableau simple
+                print(f"{'ID':<5} {'Date':<12} {'Produit':<20} {'Qté':<5} {'Total':<10} {'Client'}")
+                print("-" * 70)
+                for _, r in df.iloc[::-1].iterrows(): # Ordre inverse
+                    print(f"{r['ID']:<5} {r['Date']:<12} {r['Produit']:<20} {r['Quantité']:<5} {r['Prix Total']:<10} {r.get('Client','?')}")
+            else:
+                print("Pas de commandes.")
+
+            print("\nACTIONS :")
+            print("1. + Nouvelle Commande")
+            print("2. ✏️  Modifier une commande")
+            print("0. Retour")
+
+            c = input("\nChoix > ")
+            if c == "0": break
+            elif c == "1": self.action_add_order()
+            elif c == "2": self.action_edit_order()
+
+    def action_add_order(self):
+        print("\n--- NOUVELLE COMMANDE ---")
+        # Liste produits dispos
+        df_p = products.load_products()
+        print("Produits : " + ", ".join(df_p["Nom"].tolist()))
+        
+        prod = input("Nom du produit : ")
+        qty = input("Quantité : ")
+        
+        ok, msg = orders.create_order(self.current_user, prod, qty)
+        print(f" > {msg}")
+        time.sleep(1.5)
+
+    def action_edit_order(self):
+        oid = input("ID de la commande à modifier : ")
+        if not oid: return
+        
+        # Liste produits dispos
+        df_p = products.load_products()
+        print("Produits dispos : " + ", ".join(df_p["Nom"].tolist()))
+
+        prod = input("Nouveau produit : ")
+        qty = input("Nouvelle quantité : ")
+        
+        ok, msg = orders.update_order(int(oid), prod, qty)
+        print(f" > {msg}")
+        time.sleep(1.5)
+
+    # ==========================
+    # 3. PRODUITS
+    # ==========================
+    def view_products(self):
+        while True:
+            self.header("GESTION PRODUITS")
+            df = products.load_products()
+            
+            # Affichage
+            print(f"{'Nom':<20} {'Catégorie':<15} {'Prix':<10} {'Stock'}")
+            print("-" * 60)
+            for _, r in df.iterrows():
+                print(f"{r['Nom']:<20} {r['Catégorie']:<15} {r['Prix']:<10} {r['Quantité']}")
+
+            print("\nACTIONS :")
+            print("1. Ajouter Produit")
+            print("2. Modifier Produit")
+            print("3. Supprimer Produit")
+            print("0. Retour")
+
+            c = input("\nChoix > ")
+            if c == "0": break
+            elif c == "1":
+                n = input("Nom : "); cat = input("Catégorie : ")
+                p = float(input("Prix : ")); q = int(input("Stock : "))
+                products.add_product(n, cat, p, q)
+                print(" > Produit ajouté.")
+                time.sleep(1)
+            elif c == "2":
+                old = input("Nom exact du produit à modifier : ")
+                print("--- Nouvelles infos ---")
+                n = input("Nouveau Nom : "); cat = input("Cat : ")
+                p = float(input("Prix : ")); q = int(input("Stock : "))
+                ok, msg = products.update_product_full(old, n, cat, p, q)
+                print(f" > {msg}")
+                time.sleep(1.5)
+            elif c == "3":
+                n = input("Nom du produit à supprimer : ")
+                products.delete_product(n)
+                print(" > Supprimé.")
+                time.sleep(1)
+
+    # ==========================
+    # 4. PROFIL
+    # ==========================
+    def view_profile(self):
+        self.header("MON PROFIL")
+        print("Pour changer de mot de passe :")
+        new_p = getpass.getpass("Nouveau mot de passe : ")
+        confirm_p = getpass.getpass("Confirmer le mot de passe : ")
+        
+        if new_p != confirm_p:
+            print("\n❌ Les mots de passe ne correspondent pas.")
+        elif not new_p:
+            print("\n❌ Annulé.")
+        else:
+            status, msg = auth.change_password(self.current_user, new_p)
+            print(f"\n> {msg}")
+        
+        self.pause()
+
+    # ==========================
+    # 5. ADMIN
+    # ==========================
+    def view_admin(self):
+        while True:
+            self.header("ADMINISTRATION")
+            df = auth.load_users()
+            
+            print(f"{'Username':<20} {'Admin':<10} {'Compromis?'}")
+            print("-" * 50)
+            for _, r in df.iterrows():
+                is_adm = str(r['Admin']).lower() in ['true', '1', 'yes']
+                adm_str = "OUI 👑" if is_adm else "NON"
+                print(f"{r['Username']:<20} {adm_str:<10} {r['Compromised']}")
+
+            print("\nACTIONS :")
+            print("1. Changer rôle (Admin/User)")
+            print("2. Supprimer utilisateur")
+            print("3. Envoyer un message")
+            print("0. Retour")
+
+            c = input("\nChoix > ")
+            if c == "0": break
+            
+            elif c == "1":
+                u = input("Username : ")
+                ok, msg = auth.toggle_admin_status(u)
+                print(f" > {msg}")
+                time.sleep(1.5)
+                
+            elif c == "2":
+                u = input("Username à supprimer : ")
+                if u == "admin": print(" > Impossible de supprimer le Super Admin.")
+                else:
+                    auth.delete_user(u)
+                    print(" > Utilisateur supprimé.")
+                time.sleep(1.5)
+                
+            elif c == "3":
+                u = input("Destinataire : ")
+                m = input("Message : ")
+                auth.send_message(u, m)
+                print(" > Message envoyé.")
+                time.sleep(1)
 
 if __name__ == "__main__":
-    run_application()
+    app = CLIApp()
+    app.run()

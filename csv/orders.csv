@@ -1,6 +1,3 @@
-ID,Client,Produit,Quantité,Prix Total,Date
-1,admin,FDP,1,30.0,2025-12-12
-2,FDP,FDP,12,96.0,2025-12-12
-3,admin,hepepep,12,288.0,2025-12-15
-4,admin,FDP,2,100.0,2025-12-17
-5,admin,FDP,2,100.0,2025-12-17
+ID,Date,Produit,Quantité,Prix Total,Client
+1,2025-12-18 22:53,batard,2,48.0,admin
+2,18/12/2025,hoooooo,2,24.0,admin

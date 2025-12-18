@@ -1,72 +1,93 @@
-"""
-Module de gestion des commandes (Create/Read).
-Gère le fichier CSV des commandes et la validation des stocks.
-"""
-import os
 import pandas as pd
-import products
+import os
+import datetime
+import products  # On a besoin de products pour recalculer le prix
 
-# --- CONFIGURATION ---
-CSV_FOLDER = "csv"
-ORDERS_FILE = os.path.join(CSV_FOLDER, "orders.csv")
+ORDER_FILE = "csv/orders.csv"
 
-if not os.path.exists(CSV_FOLDER):
-    os.makedirs(CSV_FOLDER)
-
+def init_order_file():
+    if not os.path.exists("csv"): os.makedirs("csv")
+    if not os.path.exists(ORDER_FILE):
+        df = pd.DataFrame(columns=["ID", "Date", "Produit", "Quantité", "Prix Total", "Client"])
+        df.to_csv(ORDER_FILE, index=False)
 
 def load_orders():
-    """Charge le fichier CSV des commandes ou en crée un vide."""
-    if not os.path.exists(ORDERS_FILE):
-        df_orders = pd.DataFrame(columns=[
-            "ID", "Client", "Produit", "Quantité", "Prix Total", "Date"
-        ])
-        df_orders.to_csv(ORDERS_FILE, index=False)
-        return df_orders
-    return pd.read_csv(ORDERS_FILE)
-
-
-def create_order(client, nom_produit, quantite):
-    """
-    Crée une commande avec validation du stock.
-    Retourne un tuple (Succès: bool, Message: str).
-    """
-    df_prods = products.load_products()
-    # Recherche du produit
-    product_row = df_prods[df_prods["Nom"] == nom_produit]
-    if product_row.empty:
-        return False, "Produit introuvable"
-    # Récupération des infos produit
-    record = product_row.iloc[0]
-    stock_dispo = int(record["Quantité"])
-    prix_unitaire = float(record["Prix"])
-    categorie = record["Catégorie"]
-    # 1. Validation des données (Conversion)
+    init_order_file()
     try:
-        quantite = int(quantite)
-        if quantite <= 0:
-            return False, "La quantité doit être positive."
-    except ValueError:
-        return False, "Format quantité invalide."
-    # 2. Vérification Stock
-    if quantite > stock_dispo:
-        return False, f"Stock insuffisant (Dispo: {stock_dispo})"
-    # 3. Création de la ligne Commande
+        return pd.read_csv(ORDER_FILE)
+    except:
+        return pd.DataFrame(columns=["ID", "Date", "Produit", "Quantité", "Prix Total", "Client"])
+
+def create_order(client, produit_nom, quantite):
+    init_order_file()
+    try:
+        qty = int(quantite)
+    except:
+        return False, "Quantité invalide"
+
+    # Vérification stock via products.py
+    df_prod = products.load_products()
+    prod_row = df_prod[df_prod["Nom"] == produit_nom]
+    
+    if prod_row.empty:
+        return False, "Produit inconnu"
+    
+    stock_actuel = int(prod_row.iloc[0]["Quantité"])
+    prix_unit = float(prod_row.iloc[0]["Prix"])
+
+    if stock_actuel < qty:
+        return False, f"Stock insuffisant ({stock_actuel} disp.)"
+
+    # Mise à jour du stock
+    products.update_product(produit_nom, produit_nom, prod_row.iloc[0]["Catégorie"], prix_unit, stock_actuel - qty)
+
+    # Création commande
     df_orders = load_orders()
-    new_id = len(df_orders) + 1
-    total = prix_unitaire * quantite
-    new_order = pd.DataFrame([{
-        "ID": new_id,
-        "Client": client,
-        "Produit": nom_produit,
-        "Quantité": quantite,
-        "Prix Total": total,
-        "Date": pd.Timestamp.now().strftime('%Y-%m-%d')
-    }])
-    # 4. Mise à jour Stock (Décrémentation)
-    # On utilise update_product car update_stock n'existe pas forcément
-    new_stock = stock_dispo - quantite
-    products.update_product(nom_produit, nom_produit, categorie, prix_unitaire, new_stock)
-    # 5. Sauvegarde Commande
-    df_orders = pd.concat([df_orders, new_order], ignore_index=True)
-    df_orders.to_csv(ORDERS_FILE, index=False)
-    return True, "Commande validée avec succès"
+    new_id = 1 if df_orders.empty else df_orders["ID"].max() + 1
+    date_jour = datetime.datetime.now().strftime("%d/%m/%Y")
+    total = prix_unit * qty
+
+    new_row = pd.DataFrame([[new_id, date_jour, produit_nom, qty, total, client]], 
+                           columns=["ID", "Date", "Produit", "Quantité", "Prix Total", "Client"])
+    
+    df_orders = pd.concat([df_orders, new_row], ignore_index=True)
+    df_orders.to_csv(ORDER_FILE, index=False)
+    return True, "Commande créée"
+
+# --- NOUVELLE FONCTION ---
+def update_order(order_id, new_prod, new_qty):
+    """Modifie une commande existante et recalcule le prix."""
+    df = load_orders()
+    
+    # Trouver l'index de la commande
+    # On convertit ID en int pour être sûr
+    df["ID"] = df["ID"].astype(int)
+    idx_list = df.index[df["ID"] == int(order_id)].tolist()
+    
+    if not idx_list:
+        return False, "Commande introuvable"
+    
+    idx = idx_list[0]
+    
+    # Recalcul du prix
+    df_prod = products.load_products()
+    prod_row = df_prod[df_prod["Nom"] == new_prod]
+    if prod_row.empty:
+        return False, "Produit inconnu"
+        
+    try:
+        q = int(new_qty)
+        p_unit = float(prod_row.iloc[0]["Prix"])
+        total = q * p_unit
+    except:
+        return False, "Erreur calcul prix"
+
+    # Mise à jour (Note: Pour faire simple, on ne re-gère pas le stock ici pour l'instant
+    # car c'est complexe de remettre l'ancien stock et enlever le nouveau. 
+    # On change juste la commande).
+    df.at[idx, "Produit"] = new_prod
+    df.at[idx, "Quantité"] = q
+    df.at[idx, "Prix Total"] = total
+    
+    df.to_csv(ORDER_FILE, index=False)
+    return True, "Commande modifiée"

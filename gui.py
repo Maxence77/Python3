@@ -1,559 +1,435 @@
-"""
-Module de l'interface graphique (GUI) utilisant Tkinter.
-Gère l'affichage du Dashboard, des commandes, des produits et de l'authentification.
-"""
-
 import tkinter as tk
-from tkinter import ttk, messagebox
-
-# Imports tiers
-# Note: On n'importe pas pandas ici car on utilise les objets DataFrame
-# retournés par les modules products/orders, sans utiliser pd.Fonction() directement.
+from tkinter import ttk, messagebox, simpledialog
+import pandas as pd
 import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
-# Imports locaux
+# Imports locaux (assure-toi que auth.py, products.py, orders.py sont à jour)
 import products
 import auth
 import orders
 
-
 class App(tk.Tk):
-    """
-    Classe principale de l'application GUI.
-    Hérite de tk.Tk pour gérer la fenêtre racine.
-    """
-    # Tkinter nécessite beaucoup d'attributs pour les widgets, on désactive cette alerte
-    # pylint: disable=too-many-instance-attributes
-
     def __init__(self):
         super().__init__()
-        self.title("Groupe3 Enterprise ERP")
-        self.geometry("1200x800")
+        self.title("ERP Gestion - Groupe 3")
+        self.geometry("1200x850") 
 
-        # Initialisation des variables d'état
         self.current_user = None
+        self.is_admin_session = False
+        
+        # Variable pour stocker l'ID de la commande en cours de modification
+        self.editing_order_id = None 
 
-        # Initialisation des widgets (pour éviter W0201)
-        self.entry_user = None
-        self.entry_pass = None
-        self.tab_dashboard = None
-        self.tab_orders = None
-        self.tab_products = None
-        self.tab_profile = None
-        self.tree_orders = None
-        self.cb_prod = None
-        self.ent_qty = None
-        self.tree_products = None
-
-        # --- CONFIGURATION DU STYLE ---
         style = ttk.Style()
         style.theme_use('clam')
-
-        # Palette de couleurs
         self.bg_color = "#f0f2f5"
-        self.header_color = "#2c3e50"
-        self.accent_color = "#3498db"
-
         self.configure(bg=self.bg_color)
-        style.configure("TFrame", background=self.bg_color)
-        style.configure("TLabel", background=self.bg_color, font=("Segoe UI", 10))
-        style.configure("TButton", font=("Segoe UI", 10, "bold"))
-        style.configure("Card.TFrame", background="white", relief="raised")
 
         self.show_login()
 
     def clear_window(self):
-        """Nettoie tous les widgets de la fenêtre actuelle."""
         for widget in self.winfo_children():
             widget.destroy()
 
-    # =========================================================================
-    # PARTIE 1 : AUTHENTIFICATION
-    # =========================================================================
+    # ==========================
+    # LOGIN / SIGNUP
+    # ==========================
     def show_login(self):
-        """Affiche l'écran de connexion."""
         self.clear_window()
-
-        # Cadre central blanc
-        frame = tk.Frame(self, bg="white", padx=40, pady=40, relief="raised", bd=1)
+        frame = tk.Frame(self, bg="white", padx=40, pady=40, relief="raised")
         frame.place(relx=0.5, rely=0.5, anchor="center")
 
-        tk.Label(
-            frame, text="GROUPE3 SECURITY", font=("Segoe UI", 18, "bold"),
-            bg="white", fg=self.header_color
-        ).pack(pady=(0, 20))
-
-        tk.Label(
-            frame, text="Connexion Sécurisée", font=("Segoe UI", 10),
-            bg="white", fg="gray"
-        ).pack(pady=(0, 20))
-
-        tk.Label(frame, text="Identifiant", bg="white", font="bold").pack(anchor="w")
-        self.entry_user = ttk.Entry(frame, width=35)
-        self.entry_user.pack(pady=5)
-
-        tk.Label(frame, text="Mot de passe", bg="white", font="bold").pack(anchor="w")
-        self.entry_pass = ttk.Entry(frame, width=35, show="●")
-        self.entry_pass.pack(pady=5)
-
-        # Boutons
-        tk.Button(
-            frame, text="SE CONNECTER", bg=self.header_color, fg="white",
-            font=("Segoe UI", 10, "bold"), command=self.perform_login,
-            relief="flat", pady=5
-        ).pack(pady=15, fill="x")
-
-        tk.Button(
-            frame, text="Créer un compte", bg="white", fg=self.header_color,
-            font=("Segoe UI", 9, "underline"), command=self.perform_signup,
-            relief="flat"
-        ).pack(pady=0)
+        tk.Label(frame, text="GROUPE3 ERP", font=("Arial", 18, "bold"), bg="white").pack(pady=20)
+        tk.Label(frame, text="Utilisateur", bg="white").pack(anchor="w")
+        self.entry_user = ttk.Entry(frame, width=30); self.entry_user.pack(pady=5)
+        tk.Label(frame, text="Mot de passe", bg="white").pack(anchor="w")
+        self.entry_pass = ttk.Entry(frame, width=30, show="*"); self.entry_pass.pack(pady=5)
+        
+        tk.Button(frame, text="CONNEXION", bg="#2c3e50", fg="white", command=self.perform_login).pack(pady=15, fill="x")
+        tk.Button(frame, text="Créer un compte", bg="white", command=self.perform_signup).pack()
 
     def perform_login(self):
-        """Gère la logique de connexion lors du clic sur le bouton."""
-        username = self.entry_user.get()
-        password = self.entry_pass.get()
-
-        status = auth.check_login(username, password)
-
-        if status in ["OK", "COMPROMISED"]:
-            self.current_user = username
+        u = self.entry_user.get()
+        p = self.entry_pass.get()
+        
+        # On récupère le statut qui peut être FAIL, SUCCESS ou WARNING
+        status, is_admin, token = auth.authenticate_user(u, p)
+        
+        if status == "FAIL": 
+            messagebox.showerror("Erreur", "Login incorrect")
+            
+        elif status == "WARNING":
+            # Login réussi, mais mot de passe dangereux
+            messagebox.showwarning("⚠️ ATTENTION SÉCURITÉ", 
+                                   "Connexion réussie, MAIS votre mot de passe a été trouvé dans une fuite de données (HaveIBeenPwned).\n\nVeuillez le changer immédiatement dans votre Profil !")
+            self.current_user = u
+            self.is_admin_session = is_admin
             self.show_main_interface()
-
-            if status == "COMPROMISED":
-                messagebox.showwarning(
-                    "⚠️ ALERTE DE SÉCURITÉ",
-                    "Votre mot de passe a été trouvé dans une base de données piratée !\n\n"
-                    "Veuillez le changer immédiatement dans l'onglet 'Mon Profil'."
-                )
-        else:
-            messagebox.showerror("Erreur", "Identifiant ou mot de passe incorrect.")
-
+            
+        else: # SUCCESS
+            self.current_user = u
+            self.is_admin_session = is_admin
+            self.show_main_interface()
     def perform_signup(self):
-        """Gère la création de compte."""
-        username = self.entry_user.get()
-        password = self.entry_pass.get()
+        u, p = self.entry_user.get(), self.entry_pass.get()
+        if u and p:
+            code, msg = auth.create_user(u, p)
+            if code == "SUCCESS": messagebox.showinfo("OK", "Compte créé")
+            else: messagebox.showerror("Erreur", msg)
+        else: messagebox.showwarning("Info", "Remplir les champs")
 
-        if username and password:
-            result = auth.create_user(username, password)
-
-            if result == "EXIST":
-                messagebox.showerror("Erreur", "Cet utilisateur existe déjà.")
-            else:
-                # result contient le nombre de fois où le mdp a été vu (0 = safe)
-                if result > 0:
-                    messagebox.showwarning(
-                        "Compte créé avec Risque",
-                        f"Attention : ce mot de passe est apparu {result} fois dans des fuites.\n"
-                        "Il est fortement recommandé d'en changer."
-                    )
-                else:
-                    messagebox.showinfo("Succès", "Compte créé avec succès ! Connectez-vous.")
-        else:
-            messagebox.showwarning("Attention", "Veuillez remplir tous les champs.")
-
-    # =========================================================================
-    # PARTIE 2 : INTERFACE PRINCIPALE
-    # =========================================================================
+    # ==========================
+    # INTERFACE PRINCIPALE
+    # ==========================
     def show_main_interface(self):
-        """Construit l'interface principale avec les onglets."""
         self.clear_window()
+        # Header
+        h = tk.Frame(self, bg="#2c3e50", height=60); h.pack(fill="x")
+        role = "ADMIN" if self.is_admin_session else "USER"
+        tk.Label(h, text=f"👤 {self.current_user} ({role})", bg="#2c3e50", fg="white", font=("Bold", 12)).pack(side="left", padx=20)
+        tk.Button(h, text="Déconnexion", command=self.show_login, bg="#c0392b", fg="white").pack(side="right", padx=10, pady=10)
 
-        # --- HEADER ---
-        header = tk.Frame(self, bg=self.header_color, height=60)
-        header.pack(side="top", fill="x")
+        self.notebook = ttk.Notebook(self)
+        self.notebook.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        self.tab_dashboard = ttk.Frame(self.notebook)
+        self.tab_orders = ttk.Frame(self.notebook)
+        self.tab_products = ttk.Frame(self.notebook)
+        self.tab_profile = ttk.Frame(self.notebook)
+        
+        self.notebook.add(self.tab_dashboard, text="Dashboard")
+        self.notebook.add(self.tab_orders, text="Commandes")
+        self.notebook.add(self.tab_products, text="Produits")
+        self.notebook.add(self.tab_profile, text="Profil")
 
-        tk.Label(
-            header, text=f"👤 {self.current_user}", bg=self.header_color,
-            fg="white", font=("Segoe UI", 12, "bold")
-        ).pack(side="left", padx=20)
+        if self.is_admin_session:
+            self.tab_admin = ttk.Frame(self.notebook)
+            self.notebook.add(self.tab_admin, text="ADMINISTRATION")
 
-        tk.Button(
-            header, text="Déconnexion", bg="#c0392b", fg="white",
-            relief="flat", command=self.show_login
-        ).pack(side="right", padx=10, pady=10)
-
-        if self.current_user == "admin":
-            tk.Button(
-                header, text="ADMINISTRATION", bg="#e67e22", fg="white",
-                relief="flat", command=self.show_admin_popup
-            ).pack(side="right", padx=10)
-
-        # --- ONGLETS ---
-        notebook = ttk.Notebook(self)
-        notebook.pack(fill="both", expand=True, padx=10, pady=10)
-
-        self.tab_dashboard = ttk.Frame(notebook)
-        self.tab_orders = ttk.Frame(notebook)
-        self.tab_products = ttk.Frame(notebook)
-        self.tab_profile = ttk.Frame(notebook)
-
-        notebook.add(self.tab_dashboard, text=" 📊 Dashboard ")
-        notebook.add(self.tab_orders, text=" 🛒 Commandes ")
-        notebook.add(self.tab_products, text=" 📦 Produits ")
-        notebook.add(self.tab_profile, text=" 🔒 Mon Profil ")
-
+        self.notebook.bind("<<NotebookTabChanged>>", self.on_tab_change)
         self.load_dashboard_view()
-        self.load_orders_view()
-        self.load_products_view()
-        self.load_profile_view()
+        self.check_messages()
 
-    # =========================================================================
-    # PARTIE 3 : DASHBOARD
-    # =========================================================================
+    def on_tab_change(self, event):
+        tab = self.notebook.tab(self.notebook.select(), "text")
+        if tab == "Dashboard": self.load_dashboard_view()
+        elif tab == "Commandes": self.load_orders_view()
+        elif tab == "Produits": self.load_products_view()
+        elif tab == "Profil": self.load_profile_view()
+        elif tab == "ADMINISTRATION": self.load_admin_view()
+
+    def check_messages(self):
+        msgs = auth.get_user_messages(self.current_user)
+        for m in msgs: messagebox.showwarning("Message Admin", m)
+
+    # ==========================
+    # 1. DASHBOARD
+    # ==========================
     def load_dashboard_view(self):
-        """Charge les graphiques et KPI du dashboard."""
-        for widget in self.tab_dashboard.winfo_children():
-            widget.destroy()
-
-        df_orders = orders.load_orders()
-        df_products = products.load_products()
-
+        for w in self.tab_dashboard.winfo_children(): w.destroy()
+        
+        df = orders.load_orders()
+        
         # KPI
-        kpi_frame = tk.Frame(self.tab_dashboard, bg=self.bg_color)
-        kpi_frame.pack(fill="x", pady=10)
+        kf = tk.Frame(self.tab_dashboard, bg=self.bg_color); kf.pack(fill="x", pady=10)
+        ca = df["Prix Total"].sum() if not df.empty else 0
+        self.create_kpi(kf, "Chiffre d'Affaires", f"{ca:.2f} €", "#27ae60", 0)
 
-        turnover = df_orders["Prix Total"].sum() if not df_orders.empty else 0
-        volume = df_orders["Quantité"].sum() if not df_orders.empty else 0
-        # Les parenthèses ici sont nécessaires pour l'opération vectorielle avant le .sum()
-        stock_val = (
-            df_products["Prix"] * df_products["Quantité"]
-        ).sum() if not df_products.empty else 0
+        # Graphes
+        gf = tk.Frame(self.tab_dashboard, bg=self.bg_color); gf.pack(fill="both", expand=True)
+        
+        if not df.empty and "Date" in df.columns:
+            try:
+                # --- CORRECTION DATE WARNING ---
+                # On force le format explicite pour éviter le UserWarning
+                df['DateObj'] = pd.to_datetime(df['Date'], format="%d/%m/%Y", errors='coerce')
+                
+                # Nettoyage des dates invalides
+                df = df.dropna(subset=['DateObj'])
+                
+                if not df.empty:
+                    # Tri par date
+                    df = df.sort_values(by="DateObj")
+                    
+                    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5), facecolor=self.bg_color)
+                    
+                    # Graph 1: Top Produits
+                    df.groupby("Produit")["Quantité"].sum().plot(kind='bar', ax=ax1, color='#3498db')
+                    ax1.set_title("Top Produits")
+                    ax1.tick_params(axis='x', rotation=0)
 
-        self.create_kpi_card(
-            kpi_frame, "Chiffre d'Affaires", f"{turnover:,.2f} €", "#27ae60", 0
-        )
-        self.create_kpi_card(
-            kpi_frame, "Volume Ventes", f"{volume} Unités", "#2980b9", 1
-        )
-        self.create_kpi_card(
-            kpi_frame, "Valeur Stock", f"{stock_val:,.2f} €", "#8e44ad", 2
-        )
-
-        # Graphiques
-        chart_frame = tk.Frame(self.tab_dashboard, bg=self.bg_color)
-        chart_frame.pack(fill="both", expand=True, pady=10)
-
-        if not df_orders.empty:
-            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5), facecolor=self.bg_color)
-
-            # Graph 1
-            top5 = df_orders.groupby("Produit")["Quantité"].sum().nlargest(5)
-            top5.plot(kind='bar', ax=ax1, color='#3498db')
-            ax1.set_title("Top 5 Ventes")
-            ax1.set_ylabel("Qté Vendue")
-            ax1.tick_params(axis='x', rotation=45)
-
-            # Graph 2
-            evo = df_orders.groupby("Date")["Prix Total"].sum()
-            evo.plot(kind='line', marker='o', ax=ax2, color='#e74c3c')
-            ax2.set_title("Évolution C.A.")
-            ax2.grid(True, linestyle='--', alpha=0.6)
-
-            canvas = FigureCanvasTkAgg(fig, master=chart_frame)
-            canvas.draw()
-            canvas.get_tk_widget().pack(fill="both", expand=True)
+                    # Graph 2: Evolution Ventes
+                    daily_sales = df.groupby('DateObj')["Prix Total"].sum()
+                    
+                    ax2.plot(daily_sales.index, daily_sales.values, marker='o', color='#e74c3c', linestyle='-')
+                    ax2.set_title("Ventes par Jour")
+                    ax2.grid(True, linestyle='--', alpha=0.7)
+                    
+                    # Formatage des dates sur l'axe X
+                    ax2.xaxis.set_major_formatter(mdates.DateFormatter('%d/%m'))
+                    ax2.tick_params(axis='x', rotation=45)
+                    
+                    canvas = FigureCanvasTkAgg(fig, master=gf)
+                    canvas.draw()
+                    canvas.get_tk_widget().pack(fill="both", expand=True)
+                    plt.close(fig)
+                else: tk.Label(gf, text="Données dates vides ou invalides").pack()
+            except Exception as e:
+                print(e)
+                tk.Label(gf, text=f"Erreur graphe: {e}").pack()
         else:
-            tk.Label(
-                chart_frame, text="Pas assez de données pour les graphiques",
-                font=("Segoe UI", 14)
-            ).pack(pady=50)
+            tk.Label(gf, text="Pas de données").pack()
 
-    def create_kpi_card(self, parent, title, value, color, col):
-        """Crée une carte KPI stylisée."""
-        # On désactive la limite d'arguments pour cette fonction helper d'affichage
-        # pylint: disable=too-many-arguments, too-many-positional-arguments
-        card = tk.Frame(parent, bg="white", relief="raised", bd=1, padx=20, pady=15)
-        card.grid(row=0, column=col, padx=20, sticky="ew")
-        parent.grid_columnconfigure(col, weight=1)
+    def create_kpi(self, p, t, v, c, idx):
+        f = tk.Frame(p, bg="white", relief="raised", padx=20, pady=10)
+        f.grid(row=0, column=idx, padx=20, sticky="ew")
+        tk.Label(f, text=t, fg="gray").pack()
+        tk.Label(f, text=v, fg=c, font=("Bold", 16)).pack()
 
-        tk.Label(card, text=title, bg="white", fg="gray", font=("Segoe UI", 10)).pack()
-        tk.Label(card, text=value, bg="white", fg=color, font=("Segoe UI", 18, "bold")).pack()
-
-    # =========================================================================
-    # PARTIE 4 : COMMANDES
-    # =========================================================================
+    # ==========================
+    # 2. COMMANDES
+    # ==========================
     def load_orders_view(self):
-        """Affiche le formulaire de commande et l'historique."""
-        for widget in self.tab_orders.winfo_children():
-            widget.destroy()
+        for w in self.tab_orders.winfo_children(): w.destroy()
+        
+        # Titre dynamique
+        mode_text = f"MODIFIER LA COMMANDE (ID: {self.editing_order_id})" if self.editing_order_id else "NOUVELLE COMMANDE"
+        bg_color = "#f39c12" if self.editing_order_id else "#2c3e50"
+        
+        f = ttk.LabelFrame(self.tab_orders, text=mode_text)
+        f.pack(fill="x", padx=10, pady=10)
+        
+        # Chargement Produits
+        df_p = products.load_products()
+        prods = df_p["Nom"].tolist() if not df_p.empty else []
+        
+        tk.Label(f, text="Produit:").pack(side="left")
+        self.cb_order_prod = ttk.Combobox(f, values=prods, state="readonly")
+        self.cb_order_prod.pack(side="left", padx=5)
+        
+        tk.Label(f, text="Qté:").pack(side="left")
+        self.en_order_qty = ttk.Entry(f, width=5)
+        self.en_order_qty.pack(side="left", padx=5)
+        
+        # Bouton Action
+        btn_text = "Sauvegarder Modification" if self.editing_order_id else "Créer Commande"
+        tk.Button(f, text=btn_text, command=self.save_order, bg=bg_color, fg="white").pack(side="left", padx=20)
+        
+        # Bouton Annuler (si mode édition)
+        if self.editing_order_id:
+            tk.Button(f, text="Annuler", command=self.cancel_edit).pack(side="left")
 
-        form_frame = ttk.LabelFrame(self.tab_orders, text="Nouvelle Commande")
-        form_frame.pack(fill="x", padx=10, pady=10)
+        # Liste
+        tb = tk.Frame(self.tab_orders, pady=5); tb.pack(fill="x", padx=10)
+        tk.Button(tb, text="✏️ Modifier la sélection", command=self.load_order_into_form, bg="#f1c40f").pack(side="right")
 
-        df_prods = products.load_products()
-        prod_list = df_prods["Nom"].tolist() if not df_prods.empty else []
-
-        ttk.Label(form_frame, text="Produit :").pack(side="left", padx=10)
-        self.cb_prod = ttk.Combobox(form_frame, values=prod_list, state="readonly", width=25)
-        self.cb_prod.pack(side="left", padx=5)
-
-        ttk.Label(form_frame, text="Quantité :").pack(side="left", padx=10)
-        self.ent_qty = ttk.Entry(form_frame, width=10)
-        self.ent_qty.pack(side="left", padx=5)
-
-        tk.Button(
-            form_frame, text="✅ Valider la Commande", bg="#27ae60", fg="white",
-            relief="flat", command=self.submit_order
-        ).pack(side="left", padx=20)
-
-        ttk.Label(
-            self.tab_orders, text="Historique des Transactions",
-            font=("Segoe UI", 12, "bold")
-        ).pack(anchor="w", padx=10, pady=(20, 5))
-
-        cols = ("ID", "Date", "Produit", "Quantité", "Prix Total", "Client")
+        cols = ("ID", "Date", "Produit", "Quantité", "Total", "Client")
         self.tree_orders = ttk.Treeview(self.tab_orders, columns=cols, show="headings")
-        for col in cols:
-            self.tree_orders.heading(col, text=col)
-        self.tree_orders.pack(fill="both", expand=True, padx=10, pady=5)
+        for c in cols: self.tree_orders.heading(c, text=c)
+        self.tree_orders.pack(fill="both", expand=True, padx=10)
+        
+        df = orders.load_orders()
+        if not df.empty:
+            for _, r in df.iloc[::-1].iterrows():
+                self.tree_orders.insert("", "end", values=(r["ID"], r["Date"], r["Produit"], r["Quantité"], r["Prix Total"], r.get("Client","?")))
 
-        self.refresh_orders_list()
+    def save_order(self):
+        prod = self.cb_order_prod.get()
+        qty = self.en_order_qty.get()
+        
+        if not prod or not qty: return
 
-    def submit_order(self):
-        """Valide et enregistre la commande."""
-        prod = self.cb_prod.get()
-        qty = self.ent_qty.get()
-
-        if not prod or not qty:
-            messagebox.showwarning("Attention", "Veuillez sélectionner un produit et une quantité.")
-            return
-
-        res, msg = orders.create_order(self.current_user, prod, qty)
-
-        if res:
-            messagebox.showinfo("Succès", "Commande validée ! Stock mis à jour.")
-            self.ent_qty.delete(0, 'end')
-            self.refresh_orders_list()
-            self.load_dashboard_view()
-            self.load_products_view()
+        if self.editing_order_id:
+            ok, msg = orders.update_order(self.editing_order_id, prod, qty)
+            if ok:
+                messagebox.showinfo("Succès", "Commande modifiée !")
+                self.editing_order_id = None
+                self.load_orders_view()
+            else:
+                messagebox.showerror("Erreur", msg)
         else:
-            messagebox.showerror("Erreur Commande", msg)
+            ok, msg = orders.create_order(self.current_user, prod, qty)
+            if ok:
+                messagebox.showinfo("Succès", "Commande ajoutée")
+                self.load_orders_view()
+            else:
+                messagebox.showerror("Erreur", msg)
 
-    def refresh_orders_list(self):
-        """Rafraîchit le Treeview des commandes."""
-        for i in self.tree_orders.get_children():
-            self.tree_orders.delete(i)
-        df_orders = orders.load_orders()
-        if not df_orders.empty:
-            for _, row in df_orders.iloc[::-1].iterrows():
-                self.tree_orders.insert(
-                    "", "end",
-                    values=(
-                        row["ID"], row["Date"], row["Produit"],
-                        row["Quantité"], f"{row['Prix Total']} €", row["Client"]
-                    )
-                )
+    def load_order_into_form(self):
+        sel = self.tree_orders.selection()
+        if not sel: return messagebox.showwarning("Info", "Sélectionnez une commande")
+        
+        item = self.tree_orders.item(sel[0])
+        vals = item['values']
+        self.editing_order_id = vals[0]
+        self.load_orders_view()
+        self.cb_order_prod.set(vals[2])
+        self.en_order_qty.insert(0, vals[3])
 
-    # =========================================================================
-    # PARTIE 5 : PRODUITS
-    # =========================================================================
+    def cancel_edit(self):
+        self.editing_order_id = None
+        self.load_orders_view()
+
+    # ==========================
+    # 3. PRODUITS (AJOUT / MODIF / SUPPR)
+    # ==========================
     def load_products_view(self):
-        """Affiche la liste des produits et les outils CRUD."""
-        for widget in self.tab_products.winfo_children():
-            widget.destroy()
-
-        toolbar = tk.Frame(self.tab_products, bg="#dfe6e9", pady=5)
-        toolbar.pack(fill="x")
-
-        tk.Button(
-            toolbar, text="➕ Ajouter", command=self.popup_add_product, bg="white"
-        ).pack(side="left", padx=5)
-        tk.Button(
-            toolbar, text="✏️ Modifier", command=self.popup_edit_product, bg="white"
-        ).pack(side="left", padx=5)
-        tk.Button(
-            toolbar, text="🗑️ Supprimer", command=self.delete_product_action,
-            bg="white", fg="red"
-        ).pack(side="left", padx=5)
-        tk.Button(
-            toolbar, text="🔄 Actualiser", command=self.load_products_view, bg="white"
-        ).pack(side="right", padx=5)
-
+        for w in self.tab_products.winfo_children(): w.destroy()
+        
+        bar = tk.Frame(self.tab_products, pady=5); bar.pack(fill="x")
+        tk.Button(bar, text="Ajouter", command=self.pop_prod_add, bg="#27ae60", fg="white").pack(side="left")
+        tk.Button(bar, text="Modifier", command=self.pop_prod_edit, bg="#f39c12", fg="white").pack(side="left", padx=5)
+        tk.Button(bar, text="Supprimer", command=self.del_prod, bg="#c0392b", fg="white").pack(side="left", padx=5)
+        
         cols = ("Nom", "Catégorie", "Prix", "Quantité")
-        self.tree_products = ttk.Treeview(self.tab_products, columns=cols, show="headings")
-        for col in cols:
-            self.tree_products.heading(col, text=col)
-        self.tree_products.pack(fill="both", expand=True, padx=10, pady=10)
+        self.tree_prods = ttk.Treeview(self.tab_products, columns=cols, show="headings")
+        for c in cols: self.tree_prods.heading(c, text=c)
+        self.tree_prods.pack(fill="both", expand=True, padx=10)
+        
+        for _, r in products.load_products().iterrows():
+            self.tree_prods.insert("", "end", values=(r["Nom"], r["Catégorie"], r["Prix"], r["Quantité"]))
 
-        df_prods = products.load_products()
-        for _, row in df_prods.iterrows():
-            self.tree_products.insert(
-                "", "end",
-                values=(
-                    row["Nom"], row["Catégorie"],
-                    f"{row['Prix']} €", row["Quantité"]
-                )
-            )
+    def pop_prod_add(self):
+        self.open_prod_popup("Ajouter Produit")
 
-    def popup_add_product(self):
-        """Ouvre la popup d'ajout."""
-        self.product_form_window("Ajouter un Produit")
+    def pop_prod_edit(self):
+        sel = self.tree_prods.selection()
+        if not sel: return messagebox.showwarning("Info", "Sélectionnez un produit")
+        vals = self.tree_prods.item(sel[0])['values']
+        self.open_prod_popup("Modifier Produit", vals)
 
-    def popup_edit_product(self):
-        """Ouvre la popup de modification."""
-        sel = self.tree_products.selection()
-        if not sel:
-            messagebox.showwarning("Info", "Sélectionnez un produit à modifier")
-            return
+    def open_prod_popup(self, title, data=None):
+        w = tk.Toplevel(self); w.title(title)
+        
+        tk.Label(w, text="Nom").pack(); n = ttk.Entry(w); n.pack()
+        tk.Label(w, text="Cat").pack(); c = ttk.Entry(w); c.pack()
+        tk.Label(w, text="Prix").pack(); p = ttk.Entry(w); p.pack()
+        tk.Label(w, text="Qté").pack(); q = ttk.Entry(w); q.pack()
 
-        vals = self.tree_products.item(sel[0])['values']
-        price_clean = str(vals[2]).replace(" €", "")
-
-        data = {"nom": vals[0], "cat": vals[1], "prix": price_clean, "qty": vals[3]}
-        self.product_form_window("Modifier Produit", is_edit=True, old_data=data)
-
-    def product_form_window(self, title, is_edit=False, old_data=None):
-        """Crée la fenêtre modale pour ajouter/éditer un produit."""
-        win = tk.Toplevel(self)
-        win.title(title)
-        win.geometry("400x350")
-
-        tk.Label(win, text="Nom :").pack(pady=5)
-        e_nom = ttk.Entry(win)
-        e_nom.pack()
-
-        tk.Label(win, text="Catégorie :").pack(pady=5)
-        e_cat = ttk.Combobox(win, values=["Informatique", "Mobilier", "Vêtement", "Service"])
-        e_cat.pack()
-
-        tk.Label(win, text="Prix (€) :").pack(pady=5)
-        e_prix = ttk.Entry(win)
-        e_prix.pack()
-
-        tk.Label(win, text="Quantité :").pack(pady=5)
-        e_qty = ttk.Entry(win)
-        e_qty.pack()
-
-        if is_edit and old_data:
-            e_nom.insert(0, old_data['nom'])
-            e_cat.set(old_data['cat'])
-            e_prix.insert(0, old_data['prix'])
-            e_qty.insert(0, old_data['qty'])
+        old_name = None
+        if data:
+            n.insert(0, data[0]); old_name = data[0]
+            c.insert(0, data[1])
+            p.insert(0, data[2])
+            q.insert(0, data[3])
 
         def save():
             try:
-                nom, cat = e_nom.get(), e_cat.get()
-                prix, qty = float(e_prix.get()), int(e_qty.get())
-
-                if is_edit:
-                    products.update_product(old_data['nom'], nom, cat, prix, qty)
-                    messagebox.showinfo("Succès", "Produit modifié")
+                name, cat, price, qty = n.get(), c.get(), float(p.get()), int(q.get())
+                if old_name: 
+                    # Appel de la fonction de modification complète (nécessite update dans products.py)
+                    ok, msg = products.update_product_full(old_name, name, cat, price, qty)
                 else:
-                    if products.add_product(nom, cat, prix, qty):
-                        messagebox.showinfo("Succès", "Produit ajouté")
-                    else:
-                        messagebox.showerror("Erreur", "Produit déjà existant")
+                    products.add_product(name, cat, price, qty)
+                    ok, msg = True, "Ajouté"
 
-                win.destroy()
-                self.load_products_view()
-                self.load_orders_view()
+                if ok:
+                    w.destroy()
+                    self.load_products_view()
+                else:
+                    messagebox.showerror("Erreur", msg)
             except ValueError:
-                messagebox.showerror("Erreur", "Prix ou Quantité invalide")
+                messagebox.showerror("Erreur", "Prix/Qté doivent être des nombres")
+            except Exception as e:
+                # Fallback si update_product_full n'existe pas encore dans products.py
+                messagebox.showerror("Erreur", f"Erreur backend: {e}")
 
-        tk.Button(
-            win, text="Sauvegarder", command=save, bg="#3498db", fg="white"
-        ).pack(pady=20, fill="x", padx=50)
+        tk.Button(w, text="Valider", command=save, bg="#2c3e50", fg="white").pack(pady=10)
 
-    def delete_product_action(self):
-        """Supprime le produit sélectionné."""
-        sel = self.tree_products.selection()
-        if sel:
-            nom = self.tree_products.item(sel[0])['values'][0]
-            if messagebox.askyesno("Confirmer", f"Supprimer {nom} ?"):
-                products.delete_product(nom)
-                self.load_products_view()
+    def del_prod(self):
+        s = self.tree_prods.selection()
+        if s and messagebox.askyesno("Sur?", "Supprimer le produit ?"):
+            products.delete_product(self.tree_prods.item(s[0])['values'][0])
+            self.load_products_view()
 
-    # =========================================================================
-    # PARTIE 6 : PROFIL
-    # =========================================================================
+    # ==========================
+    # 4. PROFIL
+    # ==========================
     def load_profile_view(self):
-        """Affiche l'onglet de profil et changement de mot de passe."""
-        for widget in self.tab_profile.winfo_children():
-            widget.destroy()
+        for w in self.tab_profile.winfo_children(): w.destroy()
+        
+        frame = tk.Frame(self.tab_profile, bg="white", padx=20, pady=20, relief="groove")
+        frame.pack(pady=40)
 
-        card = ttk.LabelFrame(self.tab_profile, text="Gestion du Compte & Sécurité")
-        card.pack(padx=20, pady=20, fill="both", expand=True)
+        tk.Label(frame, text=f"Profil connecté : {self.current_user}", font=("Arial", 14, "bold"), bg="white").pack(pady=10)
+        
+        tk.Label(frame, text="Nouveau mot de passe :", bg="white").pack(anchor="w")
+        self.entry_new_pass = ttk.Entry(frame, show="●", width=25)
+        self.entry_new_pass.pack(pady=5)
+        
+        tk.Button(frame, text="Changer MDP", command=self.perform_pass_change, bg="#2980b9", fg="white").pack(pady=15, fill="x")
 
-        tk.Label(card, text="Changer mon mot de passe", font=("Segoe UI", 12, "bold")).pack(pady=20)
+    def perform_pass_change(self):
+        new_p = self.entry_new_pass.get()
+        if not new_p: 
+            messagebox.showwarning("Attention", "Veuillez entrer un mot de passe.")
+            return
 
-        tk.Label(card, text="Nouveau mot de passe :").pack()
-        new_pass = ttk.Entry(card, show="●")
-        new_pass.pack(pady=5)
+        # Appel au backend
+        status, msg = auth.change_password(self.current_user, new_p)
+        
+        if status == "SUCCESS":
+            messagebox.showinfo("Succès", msg)
+            self.entry_new_pass.delete(0, 'end') # Vide le champ
+        else:
+            messagebox.showerror("Erreur Sécurité", msg)
 
-        def update_pass():
-            pwd = new_pass.get()
-            if pwd:
-                count = auth.change_password(self.current_user, pwd)
-                if count > 0:
-                    messagebox.showwarning(
-                        "Sécurité Faible",
-                        f"Mot de passe mis à jour mais COMPROMIS ({count} fuites).\n"
-                        "Veuillez en choisir un plus complexe !"
-                    )
+    # ==========================
+    # 5. ADMINISTRATION
+    # ==========================
+    def load_admin_view(self):
+        for w in self.tab_admin.winfo_children(): w.destroy()
+
+        bar = tk.Frame(self.tab_admin, bg="#34495e", pady=10); bar.pack(fill="x")
+        
+        # Boutons Admin
+        tk.Button(bar, text="📧 Envoyer Msg", command=self.adm_msg).pack(side="right", padx=5)
+        tk.Button(bar, text="👑 Changer Rôle (Admin/User)", command=self.adm_toggle_role, bg="#f1c40f").pack(side="right", padx=5)
+        tk.Button(bar, text="❌ Supprimer User", command=self.adm_del, bg="#c0392b", fg="white").pack(side="right", padx=5)
+
+        cols = ("Username", "Admin", "Compromised")
+        self.tree_users = ttk.Treeview(self.tab_admin, columns=cols, show="headings")
+        for c in cols: self.tree_users.heading(c, text=c)
+        self.tree_users.pack(fill="both", expand=True, padx=10)
+
+        for _, r in auth.load_users().iterrows():
+            is_adm = str(r.get("Admin", False)).lower() in ['true', '1', 'yes']
+            disp_adm = "OUI 👑" if is_adm else "NON"
+            self.tree_users.insert("", "end", values=(r["Username"], disp_adm, r["Compromised"]))
+
+    def adm_toggle_role(self):
+        sel = self.tree_users.selection()
+        if not sel: return
+        user = self.tree_users.item(sel[0])['values'][0]
+        
+        if messagebox.askyesno("Confirmation", f"Changer le statut Admin de {user} ?"):
+            # Appel à auth.py (nouvelle fonction toggle_admin_status)
+            try:
+                ok, msg = auth.toggle_admin_status(user)
+                if ok:
+                    messagebox.showinfo("Succès", msg)
+                    self.load_admin_view()
                 else:
-                    messagebox.showinfo("Parfait", "Mot de passe mis à jour et Sécurisé ✅")
-                    new_pass.delete(0, 'end')
-            else:
-                messagebox.showerror("Erreur", "Champ vide")
+                    messagebox.showerror("Erreur", msg)
+            except AttributeError:
+                 messagebox.showerror("Erreur", "Fonction toggle_admin_status manquante dans auth.py")
 
-        tk.Button(
-            card, text="Mettre à jour le mot de passe", command=update_pass
-        ).pack(pady=15)
+    def adm_del(self):
+        sel = self.tree_users.selection()
+        if not sel: return
+        user = self.tree_users.item(sel[0])['values'][0]
+        if user == "admin": return messagebox.showerror("Stop", "Touche pas au patron.")
+        if messagebox.askyesno("Sur?", f"Supprimer {user}?"):
+            if auth.delete_user(user): self.load_admin_view()
 
-        tk.Label(
-            card, text="ℹ️ Protection API active.", fg="gray"
-        ).pack(side="bottom", pady=20)
-
-    # =========================================================================
-    # PARTIE 7 : ADMIN
-    # =========================================================================
-    def show_admin_popup(self):
-        """Affiche la fenêtre de gestion des utilisateurs (Admin seulement)."""
-        win = tk.Toplevel(self)
-        win.title("Administration Système")
-        win.geometry("500x500")
-
-        tk.Label(win, text="Gestion Utilisateurs", font=("Segoe UI", 14, "bold")).pack(pady=10)
-
-        listbox = tk.Listbox(win, font=("Consolas", 10))
-        listbox.pack(fill="both", expand=True, padx=20, pady=10)
-
-        df_users = auth.load_users()
-        for _, row in df_users.iterrows():
-            username = row["Username"]
-            status = "[⚠️ COMPROMIS]" if row["Compromised"] == "Oui" else "[OK]"
-            if username == "admin":
-                status = "[ADMIN]"
-
-            listbox.insert("end", f"{username:<20} {status}")
-
-        def del_user():
-            sel = listbox.curselection()
-            if sel:
-                line = listbox.get(sel)
-                user_to_delete = line.split()[0]
-
-                if user_to_delete == "admin":
-                    messagebox.showerror("Erreur", "Impossible de supprimer l'admin")
-                else:
-                    if messagebox.askyesno("Confirmer", f"Supprimer {user_to_delete} ?"):
-                        auth.delete_user(user_to_delete)
-                        win.destroy()
-                        self.show_admin_popup()
-
-        tk.Button(
-            win, text="Supprimer l'utilisateur sélectionné",
-            command=del_user, bg="#c0392b", fg="white"
-        ).pack(pady=10)
-
-
-def run_gui():
-    """Point d'entrée pour lancer l'application GUI."""
-    app = App()
-    app.mainloop()
-
+    def adm_msg(self):
+        s = self.tree_users.selection()
+        if s:
+            u = self.tree_users.item(s[0])['values'][0]
+            m = simpledialog.askstring("Msg", "Message:")
+            if m: auth.send_message(u, m)
 
 if __name__ == "__main__":
-    run_gui()
+    App().mainloop()
