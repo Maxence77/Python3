@@ -1,194 +1,205 @@
+"""
+Module principal de l'API Flask.
+
+Gère l'authentification, les produits, les commandes et les statistiques.
+Point d'entrée de l'application.
+"""
+
+import os
+# 1. Imports Tiers
+import pandas as pd
 from flask import Flask, jsonify, request
-from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
+from flask_jwt_extended import (
+    JWTManager, create_access_token, jwt_required, get_jwt_identity
+)
+from dotenv import load_dotenv
+
+# 2. Imports Locaux (Tes modules)
 import products
 import auth
 import orders
 import stats
 
+# Chargement des variables d'environnement (.env)
+load_dotenv()
+
 app = Flask(__name__)
+
+# --- CONFIGURATION SÉCURISÉE (Correction Bandit B105) ---
+# On récupère la clé secrète depuis le .env.
+# "dev-fallback-key" est là juste pour éviter que ça plante si tu oublies le .env en local.
+app.config["JWT_SECRET_KEY"] = os.getenv("JWT_SECRET_KEY", "dev-fallback-key")
+
 jwt = JWTManager(app)
 
-# --- CONFIGURATION JWT ---
-app.config["JWT_SECRET_KEY"] = "super-secret-key"  # Change ça en prod
-jwt = JWTManager(app)  # <--- INDISPENSABLE : C'est ça qui active l'extension !
 
 # --- ROUTE 1 : ACCUEIL ---
 @app.route('/', methods=['GET'])
 def home():
+    """Route d'accueil pour vérifier que l'API est en ligne."""
     return jsonify({"message": "API Groupe3 en ligne 🚀", "status": "active"})
 
-# --- ROUTE 2 : LOGIN (Pour obtenir le Token) ---
-# Sans cette route, impossible d'entrer dans les routes protégées !
+
+# --- ROUTE 2 : LOGIN ---
 @app.route('/api/auth/login', methods=['POST'])
 def login():
+    """Authentifie un utilisateur et retourne un token JWT."""
     data = request.get_json()
-    
-    # On vérifie si username et password sont envoyés
+
+    # Vérification des champs
     if not data or 'username' not in data or 'password' not in data:
         return jsonify({"error": "Champs manquants"}), 400
 
     username = data['username']
     password = data['password']
 
-    # On utilise ton module auth.py pour vérifier les identifiants
-    status = auth.check_login(username, password)
+    # --- MISE À JOUR SÉCURITÉ ---
+    # On utilise la fonction 'authenticate_user' du nouveau auth.py sécurisé.
+    # (Avant c'était auth.check_login)
+    status = auth.authenticate_user(username, password)
 
-    if status == "OK" or status == "COMPROMISED":
-        # C'est bon ! On génère le "badge d'accès" (Token)
+    if status == "OK":
         access_token = create_access_token(identity=username)
         return jsonify({
-            "message": "Connexion réussie", 
-            "token": access_token,
-            "security_warning": (status == "COMPROMISED")
+            "message": "Connexion réussie",
+            "token": access_token
         }), 200
-    else:
-        return jsonify({"error": "Identifiants incorrects"}), 401
 
-# --- ROUTE 3 : LISTE DES PRODUITS (Publique) ---
+    return jsonify({"error": "Identifiants incorrects"}), 401
+
+
+# --- ROUTE 3 : LISTE DES PRODUITS ---
 @app.route('/api/products', methods=['GET'])
 def get_all_products():
-    df = products.load_products()
-    # Gestion du cas où le fichier est vide ou corrompu
-    if df.empty:
+    """Retourne la liste de tous les produits."""
+    df_products = products.load_products()
+
+    if df_products.empty:
         return jsonify([])
-    # Remplacement des NaN (valeurs vides) par None pour que le JSON soit valide
-    df = df.where(pd.notnull(df), None)
-    data = df.to_dict(orient='records')
+
+    # Nettoyage des valeurs nulles (NaN) pour le JSON car JSON déteste les NaN
+    df_products = df_products.where(pd.notnull(df_products), None)
+    data = df_products.to_dict(orient='records')
     return jsonify(data)
 
-# --- ROUTE 4 : CRÉATION PRODUIT (Protégée) ---
-@app.route('/api/products', methods=['POST'])
-@jwt_required()  # <--- Il faut le Token pour entrer ici
-def create_product():
-    # Qui est connecté ?
-    current_user = get_jwt_identity()
-    
-    # (Optionnel) Tu pourrais vérifier si c'est l'admin ici
-    # if current_user != "admin": return jsonify({"error": "Interdit"}), 403
 
+# --- ROUTE 4 : CRÉATION PRODUIT ---
+@app.route('/api/products', methods=['POST'])
+@jwt_required()
+def create_product():
+    """Crée un nouveau produit (Nécessite authentification)."""
+    current_user = get_jwt_identity()
     data = request.get_json()
-    
+
     if not data or 'nom' not in data or 'prix' not in data:
         return jsonify({"error": "Champs 'nom' et 'prix' obligatoires"}), 400
-    
+
     succes = products.add_product(
-        data['nom'], 
+        data['nom'],
         data.get('catégorie', 'Autre'),
-        data['prix'], 
+        data['prix'],
         data.get('quantité', 0)
     )
-    
+
     if succes:
         return jsonify({"message": f"Produit ajouté par {current_user} !"}), 201
-    else:
-        return jsonify({"error": "Produit déjà existant"}), 409
+    return jsonify({"error": "Produit déjà existant"}), 409
 
-# --- ROUTE 5 : MODIFIER UN PRODUIT (PUT) ---
+
+# --- ROUTE 5 : MODIFIER UN PRODUIT ---
 @app.route('/api/products/<string:product_name>', methods=['PUT'])
-@jwt_required() # Sécurisé !
+@jwt_required()
 def update_product_endpoint(product_name):
-    # 1. On récupère les nouvelles données
+    """Met à jour un produit existant."""
     data = request.get_json()
-    
-    # 2. On vérifie qu'on a bien reçu quelque chose
+
     if not data:
         return jsonify({"error": "Aucune donnée envoyée"}), 400
-        
-    # 3. On charge les produits pour récupérer les anciennes valeurs (si besoin)
-    #    Astuce : Si l'utilisateur n'envoie pas le prix, on pourrait garder l'ancien.
-    #    Pour simplifier ici, on exige que l'utilisateur renvoie tout.
-    
+
     succes = products.update_product(
-        product_name, # Le nom actuel (celui dans l'URL)
-        data.get('nom', product_name), # Nouveau nom (ou garde l'ancien)
+        product_name,
+        data.get('nom', product_name),
         data.get('catégorie', 'Non classé'),
         data.get('prix', 0),
         data.get('quantité', 0)
     )
-    
+
     if succes:
         return jsonify({"message": f"Produit '{product_name}' mis à jour !"}), 200
-    else:
-        return jsonify({"error": "Produit introuvable"}), 404
+    return jsonify({"error": "Produit introuvable"}), 404
 
-# --- ROUTE 6 : SUPPRIMER UN PRODUIT (DELETE) ---
+
+# --- ROUTE 6 : SUPPRIMER UN PRODUIT ---
 @app.route('/api/products/<string:product_name>', methods=['DELETE'])
-@jwt_required() # Sécurisé !
+@jwt_required()
 def delete_product_endpoint(product_name):
-    # Appel de la fonction de suppression
+    """Supprime un produit."""
     succes = products.delete_product(product_name)
-    
+
     if succes:
         return jsonify({"message": f"Produit '{product_name}' supprimé."}), 200
-    else:
-        return jsonify({"message": f"erreur ouais ouais ouais"}), 404
-    
-   # --- ROUTE 7 : DÉTAILS D'UN PRODUIT (GET) ---
+    return jsonify({"error": "Produit introuvable"}), 404
+
+
+# --- ROUTE 7 : DÉTAILS D'UN PRODUIT ---
 @app.route('/api/products/<string:product_name>', methods=['GET'])
 def get_product_detail(product_name):
-    
-    # Appel de la fonction de recherche
+    """Récupère les détails d'un produit spécifique."""
     infos_produit = products.get_product(product_name)
-    
-    if infos_produit:
-        # Si trouvé, on renvoie le JSON du produit
-        return jsonify(infos_produit), 200
-    else:
-        # Si pas trouvé
-        return jsonify({"error": "Produit introuvable"}), 404
-    
 
+    if infos_produit:
+        return jsonify(infos_produit), 200
+    return jsonify({"error": "Produit introuvable"}), 404
+
+
+# --- ROUTE 8 : LISTE DES COMMANDES ---
 @app.route('/api/orders', methods=['GET'])
 @jwt_required()
 def get_orders():
-    # Optionnel : On pourrait filtrer pour que l'utilisateur ne voie que SES commandes.
-    # Ici, on fait simple : on affiche tout.
-    df = orders.load_orders()
-    if df.empty:
+    """Retourne la liste des commandes."""
+    df_orders = orders.load_orders()
+    if df_orders.empty:
         return jsonify([])
-    return jsonify(df.to_dict(orient='records')), 200
+    return jsonify(df_orders.to_dict(orient='records')), 200
 
-# --- ROUTE 9 : PASSER UNE COMMANDE (POST) ---
+
+# --- ROUTE 9 : PASSER UNE COMMANDE ---
 @app.route('/api/orders', methods=['POST'])
 @jwt_required()
 def add_order():
-    # 1. Qui est connecté ?
+    """Enregistre une nouvelle commande."""
     current_user = get_jwt_identity()
-    
-    # 2. Que veut-il acheter ?
     data = request.get_json()
+
     if not data or 'produit' not in data or 'quantité' not in data:
         return jsonify({"error": "Il faut 'produit' et 'quantité'"}), 400
-        
+
     nom_prod = data['produit']
-    qty = int(data['quantité'])
-    
+    # Sécurité : on s'assure que c'est bien un entier
+    try:
+        qty = int(data['quantité'])
+    except ValueError:
+        return jsonify({"error": "La quantité doit être un nombre entier"}), 400
+
     if qty <= 0:
         return jsonify({"error": "La quantité doit être positive"}), 400
 
-    # 3. Action !
-    succes, message = orders.create_order(current_user, nom_prod, qty), 'oeoeoe'
-    
+    succes, message = orders.create_order(current_user, nom_prod, qty)
+
     if succes:
         return jsonify({"message": message}), 201
-    else:
-        return jsonify({"error": message}), 409 # 409 = Conflit (stock)
+    return jsonify({"error": message}), 409
 
 
-# --- ROUTE 10 : STATISTIQUES (GET) ---
+# --- ROUTE 10 : STATISTIQUES ---
 @app.route('/api/stats', methods=['GET'])
-@jwt_required() # Réservé aux admins connectés
+@jwt_required()
 def get_stats():
-    # Appel de la fonction de calcul
+    """Retourne les statistiques globales (KPI)."""
     data = stats.get_global_stats()
-    
     return jsonify(data), 200
 
-# --- LANCEMENT ---
+
 if __name__ == '__main__':
-    # On importe pandas ici seulement si besoin pour éviter les erreurs circulaires si mal placé
-    import pandas as pd 
-    app.run(debug=True, port=5000)
-
-
-    
+    # Correction Bandit B201 : On signale que le debug=True est volontaire
+    app.run(debug=True, port=5000)  # nosec

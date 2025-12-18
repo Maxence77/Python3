@@ -1,4 +1,6 @@
-# inventory_manager.py
+"""
+Docstring pour inventory_manager
+"""
 import csv
 
 class InventoryManager:

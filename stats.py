@@ -1,33 +1,41 @@
+"""
+Module de calcul des statistiques (KPI).
+Agrège les données des produits et des commandes pour le dashboard.
+"""
+
 import products
 import orders
-import pandas as pd
+
 
 def get_global_stats():
     """
     Calcule les indicateurs clés de performance (KPI).
+    Retourne un dictionnaire avec les totaux et moyennes.
     """
     # 1. Chargement des données
     df_prods = products.load_products()
     df_orders = orders.load_orders()
-    
+
     # 2. Calculs sur les PRODUITS
     nb_produits = len(df_prods)
-    
-    # Valeur du stock = Somme de (Prix * Quantité) pour chaque ligne
-    # On convertit en float pour éviter les erreurs
-    valeur_stock = (df_prods["Prix"].astype(float) * df_prods["Quantité"].astype(int)).sum()
-    
+    valeur_stock = 0.0
+
+    if not df_prods.empty:
+        # On convertit en float/int pour sécuriser le calcul vectoriel
+        valeur_stock = (
+            df_prods["Prix"].astype(float) * df_prods["Quantité"].astype(int)
+        ).sum()
+
     # 3. Calculs sur les COMMANDES
     nb_commandes = len(df_orders)
-    
-    if nb_commandes > 0:
+    chiffre_affaires = 0.0
+    panier_moyen = 0.0
+
+    if nb_commandes > 0 and not df_orders.empty:
         chiffre_affaires = df_orders["Prix Total"].astype(float).sum()
         panier_moyen = chiffre_affaires / nb_commandes
-    else:
-        chiffre_affaires = 0
-        panier_moyen = 0
 
-    # 4. On retourne un beau dictionnaire
+    # 4. On retourne un dictionnaire formaté
     return {
         "produits_count": int(nb_produits),
         "stock_valorisation": round(float(valeur_stock), 2),

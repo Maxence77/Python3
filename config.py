@@ -1,5 +1,7 @@
+"""
+Docstring pour config
+"""
 # Configuration du design (DA Blanc & Bleu)
-
 COLORS = {
     "primary": "#0056b3",       # Bleu institutionnel
     "primary_hover": "#004494", # Bleu foncé (survol)
@@ -10,7 +12,6 @@ COLORS = {
     "danger": "#dc3545",        # Rouge suppression
     "success": "#28a745"        # Vert validation
 }
-
 FONTS = {
     "h1": ("Helvetica", 20, "bold"),
     "h2": ("Helvetica", 16, "bold"),

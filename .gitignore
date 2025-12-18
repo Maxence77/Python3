@@ -1,0 +1,15 @@
+# Ignorer le fichier de secrets (TRÈS IMPORTANT)
+.env
+
+# Ignorer le dossier des bibliothèques virtuelles
+.venv/
+venv/
+env/
+
+# Ignorer les fichiers compilés par Python (les dossiers __pycache__)
+__pycache__/
+*.pyc
+
+# Ignorer les fichiers de configuration de l'IDE (si tu utilises VS Code ou PyCharm)
+.vscode/
+.idea/
