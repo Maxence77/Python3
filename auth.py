@@ -10,11 +10,31 @@ import pandas as pd
 import requests
 from dotenv import load_dotenv
 
+import re
+
 load_dotenv()
 JWT_SECRET = os.getenv("JWT_SECRET", "super-secret-key-erp")
 
 USER_DB = "csv/users.csv"
 MSG_FILE = "csv/messages.csv"
+
+
+def validate_password_complexity(password):
+    """
+    Vérifie la sécurité du mot de passe selon des critères stricts.
+    Retourne (bool, message).
+    """
+    if len(password) < 8:
+        return False, "Le mot de passe doit contenir au moins 8 caractères."
+    if not re.search(r'[A-Z]', password):
+        return False, "Le mot de passe doit contenir au moins une majuscule."
+    if not re.search(r'[a-z]', password):
+        return False, "Le mot de passe doit contenir au moins une minuscule."
+    if not re.search(r'[0-9]', password):
+        return False, "Le mot de passe doit contenir au moins un chiffre."
+    if not re.search(r'[^a-zA-Z0-9]', password):
+        return False, "Le mot de passe doit contenir au moins un caractère spécial."
+    return True, "OK"
 
 
 def init_files():
@@ -68,6 +88,11 @@ def create_user(username, password):
     if username in df["Username"].values:
         return "FAIL", "Utilisateur existe déjà"
 
+    # Vérification de complexité
+    is_complex, msg = validate_password_complexity(password)
+    if not is_complex:
+        return "FAIL", msg
+
     if check_password_leak_api(password):
         return "FAIL", "Mot de passe COMPROMIS ! Choisissez-en un autre."
 
@@ -119,6 +144,11 @@ def check_password_leak_api(password):
 
 def change_password(username, new_password):
     """Change le mot de passe d'un utilisateur existant."""
+    # Vérification de complexité
+    is_complex, msg = validate_password_complexity(new_password)
+    if not is_complex:
+        return "FAIL", msg
+
     if check_password_leak_api(new_password):
         return "FAIL", "Mot de passe COMPROMIS ! Choisissez plus complexe."
 

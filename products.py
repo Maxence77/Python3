@@ -4,9 +4,11 @@ Permet l'initialisation, le chargement, l'ajout et la modification des produits 
 """
 
 import os
+import re
 import pandas as pd
 
 FILE_PATH = "csv/products.csv"
+
 
 
 def init_products_csv():
@@ -29,15 +31,33 @@ def load_products():
 
 
 def add_product(nom, cat, prix, qte):
-    """Ajoute un nouveau produit au catalogue après avoir vérifié son existence."""
+    """Ajoute un nouveau produit au catalogue après avoir vérifié son existence et validé les données."""
+    
+    # 1. Validation Backend (Regex) - Sécurité supplémentaire
+    if not isinstance(nom, str) or not re.match(r'^[a-zA-Z\s]+$', nom):
+        return False, "Nom invalide (Lettres uniquement)"
+    
+    if not isinstance(cat, str) or not re.match(r'^[a-zA-Z0-9\s]+$', cat):
+        # On autorise chiffres et lettres pour la catégorie
+        return False, "Catégorie invalide (Pas de caractères spéciaux)"
+        
+    try:
+        f_prix = float(prix)
+        i_qte = int(qte)
+        if f_prix < 0 or i_qte < 0:
+             return False, "Prix ou Quantité négatifs interdits"
+    except ValueError:
+        return False, "Prix ou Quantité doivent être numériques"
+
     df = load_products()
     if nom in df["Nom"].values:
-        return False
+        return False, "Produit existe déjà"
+
     cols = ["Nom", "Catégorie", "Prix", "Quantité"]
-    new_row = pd.DataFrame([[nom, cat, prix, qte]], columns=cols)
+    new_row = pd.DataFrame([[nom, cat, f_prix, i_qte]], columns=cols)
     df = pd.concat([df, new_row], ignore_index=True)
     df.to_csv(FILE_PATH, index=False)
-    return True
+    return True, "Produit ajouté"
 
 
 def update_product(old_name, new_name, new_cat, new_prix, new_qte):
