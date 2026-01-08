@@ -55,7 +55,19 @@ def init_files():
             admin_needed = True
 
     if admin_needed:
-        h_pw = hashlib.sha256("Admin@1234".encode()).hexdigest()
+        import secrets
+        import string
+
+        # Récupération du mot de passe Admin (depuis .env ou génération aléatoire)
+        admin_pw = os.getenv("ADMIN_PASSWORD")
+        
+        if not admin_pw:
+            alphabet = string.ascii_letters + string.digits + "!@#$%"
+            admin_pw = "".join(secrets.choice(alphabet) for _ in range(16))
+            print(f"\n[SECURITE] Mot de passe Admin généré : {admin_pw}")
+            print("[INFO] Configurez ADMIN_PASSWORD dans .env pour le personnaliser.\n")
+
+        h_pw = hashlib.sha256(admin_pw.encode()).hexdigest()
         cols = ["Username", "PasswordHash", "Admin", "Compromised"]
         try:
             old_df = pd.read_csv(USER_DB)
